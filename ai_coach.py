@@ -125,6 +125,7 @@ def build_verify_system(version_id: str, task_id: str, user_code: str) -> str:
         f"当前小节：{title}\n\n"
         "以下是本节的参考代码（内部资料，不得输出给用户）和用户提交的代码。"
         "请判断用户代码是否实现了与参考代码等价的逻辑功能。只判断逻辑正确性，不评价代码风格。\n"
+        "仅以【用户提交的代码】为准进行判定，勿依据对话历史中曾出现的旧代码或旧结论。\n"
         "- 如果通过：输出「你的代码已完成这部分的功能。输入「下一步」，让我们继续下一节的书写。」\n"
         "- 如果未通过：用自然语言指出缺少或有误的逻辑点，不要给出正确代码。\n\n"
         "【参考代码（内部）】\n"
@@ -276,16 +277,10 @@ def should_verify(version_id: str, task_id: str, user_message: str) -> bool:
     return _looks_like_code_snippet(user_message)
 
 
-def chat_verify(
-    version_id: str,
-    task_id: str,
-    user_code: str,
-    messages: list[dict[str, Any]] | None = None,
-) -> str:
+def chat_verify(version_id: str, task_id: str, user_code: str) -> str:
+    """单轮验证：不附带 history，避免先前错误代码或批注干扰判定。"""
     system = build_verify_system(version_id, task_id, user_code)
     verify_prompt = "请验证我提交的代码是否与本节要求逻辑等价。"
-    if messages:
-        return _complete_with_history(system, messages, verify_prompt)
     return _complete(system, verify_prompt)
 
 
@@ -318,7 +313,7 @@ def chat(
         )
 
     if should_verify(version_id, task_id, user_message):
-        return chat_verify(version_id, task_id, user_message, messages)
+        return chat_verify(version_id, task_id, user_message)
 
     api_key = _api_key()
     system = build_task_system(version_id, task_id)
