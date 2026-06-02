@@ -1,0 +1,267 @@
+{
+  "planning": {
+    "section_id": "v4.plan",
+    "task_id": "task_v4_plan",
+    "title": "功能设计",
+    "description": "﻿# 第 4 章　旗帜、炸弹与箭矢：完整的战场\n上一章建立了完整的行军与战斗框架，武士能够在城市之间移动并在相遇时交战。这一章的战场大幅扩充：城市开始积累生命元、武士能用箭矢跨城射击、炸弹可以在主战前引爆，城市上空会升起胜方旗帜；战斗中的细节——ninja 不还手、lion 击杀后吸血、dragon 欢呼、wolf 缴获武器——也全部落地；司令部还会在战斗结束后向获胜武士补充生命值。\n代码方面，新的实现回归了更直接的设计：用 `TimeProc(int hour, int mtype)` 按时间槽顺序调度，每一步直接用 `printf` 输出，不再缓冲事件。这样做行得通，是因为十个时间槽在一小时内的顺序本身就是正确的输出顺序，不需要事后排序。\n\n与第 3 章相比，本章的改动分为四个方向：\n第一，新增 `City` 类，用来记录每座城市的生命元积累、旗帜状态，以及当前驻扎的红蓝武士下标。第二，新增 `Arms` 类，取代上一章多态继承的 `CWeapon` 体系，改为每名武士持有一个固定 3 槽的 `nArms[3]` 数组，三个槽分别对应剑、炸弹、箭矢，结构更简单直接。第三，引入新的时间参数 R（箭矢伤害），并在每小时的调度表中新增三个时间点：`:20` 城市积累生命元、`:30` 单方占领武士收割生命元、`:38` 炸弹先发；上一章的七个时间点因此扩充为十个。第四，从 `TimeProc` 中把最复杂的两段逻辑——炸弹先发和正式战斗——各自拆出为独立函数 `BombPhase()` 和 `FightPhase()`，使 `TimeProc` 本体保持简洁。\n此外，在所有类定义之前，文件顶部需要声明以下全局常量和变量，供各类和函数直接引用：\n- 整型常量 `WarriorKinds = 5` 记录武士种类总数，`ArmKinds = 3` 记录武器种类总数；两者频繁用作数组大小和取模上界，统一命名后改动只需改一处。\n- 字符串指针数组 `ColorName[] = {\"red\", \"blue\"}`，下标 0 对应红方，1 对应蓝方，供打印输出时直接索引。\n- 字符串指针数组 `WarriorName[] = {\"dragon\", \"ninja\", \"iceman\", \"lion\", \"wolf\"}`，下标与武士种类编号一一对应。\n- 整型数组 `WarriorHP[WarriorKinds]` 和 `WarriorAttack[WarriorKinds]`，在 `run()` 中从输入读入，供 `Warrior::init()` 读取每种武士的初始生命值和攻击力。\n- `HeadQuarter head[2]`：两个司令部对象，`head[0]` 是红方，`head[1]` 是蓝方；对象全局只创建一次，每局通过 `init()` 重置。\n- `City mCity[22]`：城市对象数组，下标 0 是红方大本营（虚拟节点），下标 1 至 N 是真正的战场城市，下标 N+1 是蓝方大本营（虚拟节点）；城市最多 20 座，加上两端虚拟节点共 22 个，数组下标与城市编号直接对应。\n- 整型 `M`、`N`、`R`、`K`、`T`：每局游戏的五个输入参数，声明为全局变量以便 `TimeProc` 等函数直接访问而无需参数传递。",
+    "code": "",
+    "skip_code_verify": true,
+    "role": "planning",
+    "learning_goal": "先搭城市与调度全局框架，再逐步补全武士战斗细节。",
+    "source_section_refs": [
+      "__intro_planning__"
+    ],
+    "code_block_refs": []
+  },
+  "groups": [
+    {
+      "h2_id": "v4.A",
+      "h2_title": "先搭城市场景骨架",
+      "sections": [
+        {
+          "section_id": "v4.A.1",
+          "task_id": "task_v4_decl_city",
+          "title": "声明 City 并定义城旗状态",
+          "description": "学习目标：明确城市对象在战场中的状态与职责。\n\n下面来声明 `City` 类，它负责管理每座城市的全部状态。\n\n`City` 类的所有成员均为公开。整型 `nFlag` 记录当前升旗的阵营编号（0 = 红，1 = 蓝，-1 = 未升旗）；旗帜一旦升起，该城市的先手权就永久归属旗帜方，直到对方旗帜替换它。整型 `nID` 存储城市自身的编号。整型 `nHP` 是城市积累的生命元，每小时第 20 分自动加 10，当一方武士独占该城市时在第 30 分全部收割走。整型 `nWin` 记录上一次战斗的获胜阵营（-1 = 平局或初始），旗帜判定需要连续两次同一方获胜，`nWin` 正是存储\"上一次\"结果的字段。整型数组 `nWid[2]` 是两个武士下标：`nWid[0]` 存红方武士在 `head[0].w` 向量里的位置，`nWid[1]` 存蓝方的位置，值为 -1 表示该阵营目前无人驻守；有了这两个下标，战斗代码就能用 `head[j].w[nWid[j]]` 直接定位到城市里的武士。此外声明了 `init()` 和 `SetWin()` 两个方法，函数体在后两节给出。",
+          "code": "// warcraft4.cpp\nclass City\n{\npublic:\n    int nFlag;     // ①\n    int nID;\n    int nHP;       // ②\n    int nWin;      // ③\n    int nWid[2];   // ④\n    void init();\n    void SetWin(int i, int hour, int id);\n};",
+          "learning_goal": "明确城市对象在战场中的状态与职责。",
+          "source_section_refs": [
+            "4.2.1"
+          ],
+          "code_block_refs": [
+            "4.2.1"
+          ],
+          "prerequisites": []
+        },
+        {
+          "section_id": "v4.A.2",
+          "task_id": "task_v4_decl_arms_warrior",
+          "title": "声明 Arms 与 Warrior 结构",
+          "description": "学习目标：建立武器与武士的数据结构基础。\n\n`Arms` 类只有两个公开整型成员和一个默认构造函数。`nAttack` 是剑的附加攻击力：每次攻击时将 `nAttack` 叠加到基础攻击力上，使用后乘以 0.8 衰减（整数截断）；若持有的不是剑，`nAttack` 保持 0 不参与计算。`nTimes` 是炸弹或箭矢的剩余使用次数：炸弹初始为 1，箭矢初始为 3，每次使用减一，归零后不再触发。默认构造函数将两个字段均初始化为 0。\n\n三种武器共用这一个类，每名武士的 `nArms[3]` 数组三个槽含义固定：`nArms[0]` 是剑（只有 `nAttack` 有意义），`nArms[1]` 是炸弹（只有 `nTimes` 有意义），`nArms[2]` 是箭矢（只有 `nTimes` 有意义）。\n\n`Warrior` 类的所有成员均为公开。整型 `nColor` 记录阵营（0 = 红，1 = 蓝）；`nHP` 记录当前生命值，构造函数将其初始化为 0；`nKind` 记录武士种类编号（0=dragon, 1=ninja, 2=iceman, 3=lion, 4=wolf）；`nID` 记录武士序号（从 1 开始）。`Arms nArms[3]` 是固定 3 槽的武器数组，`Arms` 的默认构造函数将全部槽初始化为 0，武士生产时根据种类和编号只激活其中部分槽。整型 `nLoyal` 记录 lion 的忠诚度，整型 `nAttack` 记录基础攻击力，`double nMorale` 记录 dragon 的士气。此外声明了默认构造函数（只将 `nHP` 置零）、`init()` 和 `PrintBornInfo()` 两个方法。",
+          "code": "// warcraft4.cpp\n--snip--\nclass Arms\n{\npublic:\n    int nAttack;   // ①\n    int nTimes;    // ②\n    Arms() { nAttack = 0; nTimes = 0; }\n};\n\n// warcraft4.cpp\n--snip--\nclass Warrior\n{\npublic:\n    int    nColor;\n    int    nHP;\n    int    nKind;\n    int    nID;\n    Arms   nArms[3];    // ①\n    int    nLoyal;\n    double nMorale;\n    int    nAttack;\n    Warrior() { nHP = 0; }\n    void init(int __nColor, int __nKind, int __nID, int nRemainHP);\n    void PrintBornInfo(int hour);\n};",
+          "learning_goal": "建立武器与武士的数据结构基础。",
+          "source_section_refs": [
+            "4.3.1",
+            "4.3.2"
+          ],
+          "code_block_refs": [
+            "4.3.1",
+            "4.3.2"
+          ],
+          "prerequisites": [
+            "task_v4_decl_city"
+          ]
+        },
+        {
+          "section_id": "v4.A.3",
+          "task_id": "task_v4_decl_headquarter",
+          "title": "声明 HeadQuarter 核心字段与接口",
+          "description": "学习目标：把生产方与城市战场关系在接口层先串起来。\n\n`HeadQuarter` 类的所有成员均为公开。整型 `nTotalHP` 是司令部当前持有的生命元，每次生产武士都从这里扣减，`:30` 收割和战斗胜利时补充，司令部补血也从这里取出。整型 `nTempHP` 是本轮战斗赚取的临时生命元：战斗结束时赢得的城市生命元先暂存到 `nTempHP`，等到 `:50` 报告时才并入 `nTotalHP`；这样做是为了避免战斗刚胜利就立刻补充到 `nTotalHP` 导致司令部当轮还能继续向其他城市补血的不公平，暂存后统一合并使规则更简洁。整型 `nTotalWarrior` 记录累计生产的武士总数，整型 `nCurWarrior` 记录本小时刚生产的武士在 `w` 向量里的下标（生产失败时为 -1），用于 `:05` 的 lion 逃跑检查——新生武士尚未进入任何城市的 `nWid` 数组，需要通过这个下标单独访问。整型 `nColor` 记录阵营，整型 `nEnemy` 记录抵达本方司令部的敌方武士数量。静态二维数组 `Order[2][WarriorKinds]` 存放红蓝双方的武士生产顺序，须在类外单独定义，初始值硬编码为 `{{2,3,4,1,0},{3,0,1,2,4}}`：第一行 `{2,3,4,1,0}` 是红方的生产顺序（种类编号依次为 iceman→lion→wolf→ninja→dragon），第二行 `{3,0,1,2,4}` 是蓝方的顺序（lion→dragon→ninja→iceman→wolf）；这与第 1 章的 `makingSeq` 等价，只是本章改用 `nTotalWarrior % WarriorKinds` 直接取模作为索引，而非维护单独的 `curMakingSeqIdx`。`vector<Warrior> w` 是存储所有武士对象的向量。此外声明了 `init()`、析构函数和 `Produce()` 三个方法。",
+          "code": "// warcraft4.cpp\n--snip--\nclass HeadQuarter\n{\npublic:\n    int nTotalHP;       // ①\n    int nTempHP;        // ②\n    int nTotalWarrior;\n    int nCurWarrior;    // ③\n    int nColor;\n    int nEnemy;\n    static int Order[2][WarriorKinds];\n    vector<Warrior> w;\n    void init(int __nTotalHP, int __nColor);\n    ~HeadQuarter();\n    void Produce(int nHour);\n};",
+          "learning_goal": "把生产方与城市战场关系在接口层先串起来。",
+          "source_section_refs": [
+            "4.4.1"
+          ],
+          "code_block_refs": [
+            "4.4.1"
+          ],
+          "prerequisites": [
+            "task_v4_decl_arms_warrior"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v4.B",
+      "h2_title": "补初始化与状态演化",
+      "sections": [
+        {
+          "section_id": "v4.B.1",
+          "task_id": "task_v4_init_city_headquarter",
+          "title": "实现 City 与 HeadQuarter 初始化",
+          "description": "学习目标：保证城市与司令部在每轮开始时状态一致。\n\n`init()` 把城市重置到初始状态，在每局游戏开始前调用。函数体将四个关键字段全部清零或置为无效值：`nHP` 置 0（没有积累任何生命元）；`nWin` 置 -1（无战绩记录）；`nFlag` 置 -1（没有任何旗帜）；`nWid[0]` 和 `nWid[1]` 同时置 -1（双方均无驻守武士）。`nFlag` 和 `nWin` 都需要初始化：`nFlag` 控制先手，`nWin` 控制升旗判断——如果只清零其中之一，旗帜逻辑就会产生错误。\n\n`init()` 接受初始生命元和阵营颜色两个参数，将全部成员重置：`nTempHP` 置 0、`nTotalHP` 赋为传入值、`nColor` 赋为传入值、`nTotalWarrior` 置 0、`nEnemy` 置 0，最后调用 `w.clear()` 清空武士向量，释放上一局遗留的对象。与第 1 章用 `Init()` 而非构造函数处理多组测试数据的原因相同：对象在主函数里只创建一次，每组数据开始时调用 `init()` 重置。\n\n析构函数同样调用 `w.clear()` 清空向量，确保程序结束时武士对象被正确释放。",
+          "code": "// warcraft4.cpp\n--snip--\nvoid City::init()\n{\n    nHP             = 0;\n    nWin            = -1;\n    nFlag           = -1;   // ①\n    nWid[0] = nWid[1] = -1;\n}\n\n// warcraft4.cpp\n--snip--\nvoid HeadQuarter::init(int __nTotalHP, int __nColor)\n{\n    nTempHP       = 0;\n    nTotalHP      = __nTotalHP;\n    nColor        = __nColor;\n    nTotalWarrior = 0;\n    nEnemy        = 0;\n    w.clear();    // ①\n}\n\nHeadQuarter::~HeadQuarter()\n{\n    w.clear();\n}",
+          "learning_goal": "保证城市与司令部在每轮开始时状态一致。",
+          "source_section_refs": [
+            "4.2.2",
+            "4.4.2"
+          ],
+          "code_block_refs": [
+            "4.2.2",
+            "4.4.2"
+          ],
+          "prerequisites": [
+            "task_v4_decl_headquarter"
+          ]
+        },
+        {
+          "section_id": "v4.B.2",
+          "task_id": "task_v4_init_warrior_born",
+          "title": "实现 Warrior 初始化与出生信息",
+          "description": "学习目标：按类型正确分配武器并输出出生事件。\n\n`init()` 接受阵营 `__nColor`、种类 `__nKind`、编号 `__nID`、司令部扣减后剩余生命元 `nRemainHP` 四个参数，完成武士的完整初始化。\n\n函数体首先将四个参数赋给对应成员，再从全局数组 `WarriorHP` 和 `WarriorAttack` 读取该种类的初始生命值和攻击力。\n\n随后按武士种类分支初始化武器。dragon 拿一件武器：用 `nID % ArmKinds`（即编号对 3 取模）决定武器类型；若结果为 0 则设置剑的附加攻击力为 `nAttack * 0.2`（整数截断，与第 3 章整数乘法的精度规避思路一致），若为 1 则将炸弹次数置 1，若为 2 则将箭矢次数置 3。dragon 还额外计算士气：`nMorale = (double)nRemainHP / nHP`，即司令部生产完这名 dragon 之后的剩余生命元除以 dragon 的初始生命值，反映司令部的宽裕程度。\n\nninja 拿两件武器：以 `nID % ArmKinds` 决定第一件，第二件为顺序上的下一种，保证每名 ninja 都双持两件不同武器——编号余 0 时拿剑和炸弹，余 1 时拿炸弹和箭矢，余 2 时拿箭矢和剑。\n\niceman 的武器分配规则与 dragon 完全相同，拿一件由编号决定的武器，但不计算士气。\n\n接上一小节，补全 lion 和 wolf 的初始化，以及降生消息的打印。\n\nlion 的初始化只有一行：将忠诚度 `nLoyal` 设为 `nRemainHP`，即司令部生产完 lion 之后的剩余生命元（由 `Produce()` 在扣减生命元后传入），而非生产前，保证了忠诚度与实际剩余量一致。wolf 没有任何额外初始化，函数体在 `else if(nKind==3)` 分支结束后直接关闭，不进入 wolf 的分支。\n\n`PrintBornInfo()` 接受当前小时数 `hour`，打印降生消息。所有武士都先打印一行公共格式 `\"HHH:00 color kind N born\"`。随后根据种类追加额外信息：dragon 打印 `\"Its morale is X.XX\"`（保留两位小数）；lion 打印 `\"Its loyalty is N\"`；ninja、iceman、wolf 只有公共的第一行，不追加任何内容。",
+          "code": "// warcraft4.cpp\n--snip--\nvoid Warrior::init(int __nColor, int __nKind, int __nID, int nRemainHP)\n{\n    nColor  = __nColor;\n    nKind   = __nKind;\n    nID     = __nID;\n    nHP     = WarriorHP[nKind];\n    nAttack = WarriorAttack[nKind];\n    if (nKind == 0)   // dragon\n    {\n        int nArmKind = nID % ArmKinds;\n        if (nArmKind == 0)\n            nArms[0].nAttack = nAttack * 0.2;   // ①\n        else if (nArmKind == 1)\n            nArms[1].nTimes = 1;                // ②\n        else\n            nArms[2].nTimes = 3;                // ③\n        nMorale = (double)nRemainHP / nHP;      // ④\n    }\n    else if (nKind == 1)  // ninja（拿两件）\n    {\n        int nArmKind = nID % ArmKinds;\n        if      (nArmKind == 0) { nArms[0].nAttack = nAttack * 0.2; nArms[1].nTimes = 1; }\n        else if (nArmKind == 1) { nArms[1].nTimes  = 1;             nArms[2].nTimes = 3; }\n        else                    { nArms[2].nTimes  = 3; nArms[0].nAttack = nAttack * 0.2; }\n    }\n    else if (nKind == 2)  // iceman（同 dragon，拿一件）\n    {\n        int nArmKind = nID % ArmKinds;\n        if      (nArmKind == 0) nArms[0].nAttack = nAttack * 0.2;\n        else if (nArmKind == 1) nArms[1].nTimes  = 1;\n        else                    nArms[2].nTimes   = 3;\n    }\n    --snip--\n\n// warcraft4.cpp（接上）\n    --snip--\n    else if (nKind == 3)  // lion\n    {\n        nLoyal = nRemainHP;   // ①\n    }\n    // wolf：无任何额外初始化\n}\n\nvoid Warrior::PrintBornInfo(int hour)\n{\n    printf(\"%03d:00 %s %s %d born\\n\", hour, ColorName[nColor], WarriorName[nKind], nID);\n    if (nKind == 0)\n        printf(\"Its morale is %.02f\\n\", nMorale);   // ②\n    else if (nKind == 3)\n        printf(\"Its loyalty is %d\\n\", nLoyal);      // ③\n}",
+          "learning_goal": "按类型正确分配武器并输出出生事件。",
+          "source_section_refs": [
+            "4.3.3",
+            "4.3.4"
+          ],
+          "code_block_refs": [
+            "4.3.3",
+            "4.3.4"
+          ],
+          "prerequisites": [
+            "task_v4_decl_arms_warrior"
+          ]
+        },
+        {
+          "section_id": "v4.B.3",
+          "task_id": "task_v4_city_flag_rule",
+          "title": "实现 City::SetWin 城旗规则",
+          "description": "学习目标：让连胜与升旗逻辑可复用并可追踪。\n\n每次战斗结束后调用 `SetWin()`，更新战绩并判断是否升旗。函数接受三个参数：获胜阵营 `i`（-1 表示平局）、当前小时数 `hour`、城市编号 `id`。\n\n函数按四个分支处理：第一，`i == -1` 表示平局，只将 `nWin` 清为 -1——连续胜利的链条断开，回到初始状态，然后直接返回。第二，`nFlag == -1 && nWin == -1` 是\"完全初始\"状态（游戏刚开始或平局后的第一次战斗），此时只记录本轮胜者到 `nWin`，不升旗，直接返回。第三，`nFlag != i && nWin == i` 是升旗的核心判断：`nWin == i` 说明上一次也是 `i` 方赢（即连续两次），`nFlag != i` 说明当前旗帜不是 `i` 方的（若已是则无需重复升旗）；两个条件同时成立时，将 `nFlag` 更新为 `i`，打印升旗消息，然后返回——旗帜已定，`nWin` 的历史记录不再更新。第四，其余情况（上一次不是 `i` 方赢，或旗帜已是 `i` 方）只将 `nWin` 更新为 `i`，留给下一轮判断。",
+          "code": "// warcraft4.cpp\n--snip--\nvoid City::SetWin(int i, int hour, int id)\n{\n    if (i == -1)          // ①\n    {\n        nWin = -1;\n        return;\n    }\n    if (nFlag == -1 && nWin == -1)   // ②\n    {\n        nWin = i;\n        return;\n    }\n    if (nFlag != i && nWin == i)     // ③\n    {\n        nFlag = i;\n        printf(\"%03d:40 %s flag raised in city %d\\n\", hour, ColorName[i], id);\n        return;\n    }\n    nWin = i;   // ④\n}",
+          "learning_goal": "让连胜与升旗逻辑可复用并可追踪。",
+          "source_section_refs": [
+            "4.2.3"
+          ],
+          "code_block_refs": [
+            "4.2.3"
+          ],
+          "prerequisites": [
+            "task_v4_init_city_headquarter"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v4.C",
+      "h2_title": "实现生产与时间调度主线",
+      "sections": [
+        {
+          "section_id": "v4.C.1",
+          "task_id": "task_v4_produce",
+          "title": "实现 HeadQuarter::Produce",
+          "description": "学习目标：把武士生产规则稳定接入全局时序。\n\n`Produce()` 接受当前小时数 `nHour`，尝试生产一名武士。\n\n首先用 `nTotalWarrior % WarriorKinds` 在 0 到 4 之间循环，配合 `Order[nColor]` 取出当前该生产的武士种类编号 `i`——这与第 1 章的 `curMakingSeqIdx` 等价，只是直接用已生产总数取模，更简洁。若该种武士所需 HP 超过司令部当前 `nTotalHP`，则将 `nCurWarrior` 置 -1（供 `:05` 检查时跳过）并直接返回，不生产任何武士。\n\n若生产得起，先从 `nTotalHP` 扣减该武士的 HP，然后构造一个本地 `Warrior` 对象 `nw`，以阵营、种类、编号（`nTotalWarrior + 1`，从 1 开始）、扣减后的 `nTotalHP` 为参数调用 `nw.init()`——lion 的忠诚度和 dragon 的士气都用这个扣后值计算。随后立即调用 `nw.PrintBornInfo(nHour)` 打印降生消息，将 `nw` 追加到向量 `w`，把 `nCurWarrior` 设为 `nTotalWarrior`（此时还未 `++`，所以下标和向量位置一致），最后将 `nTotalWarrior` 自增。",
+          "code": "// warcraft4.cpp\n--snip--\nvoid HeadQuarter::Produce(int nHour)\n{\n    int i = Order[nColor][nTotalWarrior % WarriorKinds];   // ①\n    if (WarriorHP[i] > nTotalHP)\n    {\n        nCurWarrior = -1;   // ②\n        return;\n    }\n    nTotalHP -= WarriorHP[i];\n    Warrior nw;\n    nw.init(nColor, i, nTotalWarrior + 1, nTotalHP);       // ③\n    nw.PrintBornInfo(nHour);\n    w.push_back(nw);\n    nCurWarrior   = nTotalWarrior;                         // ④\n    nTotalWarrior++;\n}",
+          "learning_goal": "把武士生产规则稳定接入全局时序。",
+          "source_section_refs": [
+            "4.4.3"
+          ],
+          "code_block_refs": [
+            "4.4.3"
+          ],
+          "prerequisites": [
+            "task_v4_init_warrior_born"
+          ]
+        },
+        {
+          "section_id": "v4.C.2",
+          "task_id": "task_v4_timeproc_skeleton",
+          "title": "搭建 TimeProc 骨架与早期时刻处理",
+          "description": "学习目标：先跑通 05/10/20/30 的时间节奏，形成调度骨架。\n\n十个时间点的调度全部集中在 `TimeProc(int hour, int mtype)` 里，`mtype` 是时间槽索引（0 到 9）。\n\n文件开头定义宏 `MinuteType = 10` 和对应的分钟偏移数组 `WorkMinute[10] = {0, 5, 10, 20, 30, 35, 38, 40, 50, 55}`，把\"第几个时间槽\"映射到\"每小时第几分\"。\n\n`TimeProc` 函数体是一系列 `if (mtype == N)` 分支，每个分支处理一个时间槽并返回：索引 0（`:00`）触发双方造兵；索引 1（`:05`）触发 lion 逃跑；索引 2（`:10`）触发行军；索引 3（`:20`）触发城市积累；索引 4（`:30`）触发单方收割；索引 5（`:35`）触发箭矢射击；索引 6（`:38`）委托给 `BombPhase(hour)` 处理炸弹先发；索引 7（`:40`）委托给 `FightPhase(hour)` 处理正式战斗；索引 8（`:50`）打印生命元报告；索引 9（`:55`）打印武器报告。最复杂的两段逻辑委托给独立函数，使 `TimeProc` 本体只剩调度表的骨架，每个分支代码量不超过二十行，便于阅读。与第 3 章的七个时间点相比，`:20`、`:30`、`:38` 是本章新增的三个时间点。\n\n**`:05` lion 逃跑**\n\n每小时第 5 分，检查所有忠诚度归零的 lion。代码分两轮扫描。\n\n第一轮遍历全部城市（`i` 从 1 到 N），对每座城市的红蓝两个驻守武士槽（`j` = 0 和 1）逐一检查：若下标有效（`nWid[j] >= 0`）、该武士种类为 lion（`nKind == 3`）、仍存活（`nHP > 0`）且忠诚度已降至 0 或以下（`nLoyal <= 0`），则打印 `\"HHH:05 color lion N ran away\"` 并将该 lion 的 `nHP` 置 0——代码中以 HP 是否大于 0 判断武士是否存活，置零即等同于\"移除\"，不需要从向量中删除。\n\n第二轮单独检查本小时刚生产的武士（通过 `nCurWarrior` 直接访问），因为新生武士还没有出现在任何 `mCity[].nWid[]` 里，第一轮的城市遍历找不到它。对每个 `nCurWarrior >= 0` 的司令部，若新武士恰好是忠诚度已归零的 lion，则同样打印逃跑消息并将 `nHP` 置 0。\n\n**`:10` 行军**\n\n行军代码先用 `old[23][2]` 数组快照当前所有城市的武士位置，再统一更新。`old[0][0]` 被设为红方 `nCurWarrior`（本小时新生的红方武士\"放入\"编号 0 的虚拟起始位置），`old[N+1][1]` 被设为蓝方 `nCurWarrior`，这样在循环 `i=1` 时读 `old[i-1][0]` 就能自然地让新武士迈入城市 1，无需特殊处理。\n\n随后循环城市 1 到 N，从 `old[i-1][0]` 读出即将进入城市 `i` 的红方武士下标 `nID`。若武士有效且存活，则检查 iceman 的特殊行军损耗：红方 iceman 进入偶数城市时 HP 减 9（最低保留 1），攻击力加 20；偶数城市的规则源于红方从城市 0 出发，走第 2 步恰好到偶数城市，模拟冰封环境每两步恶化一次。蓝方 iceman 的条件 `(N-i)%2==1` 与此对称。处理完损耗后打印行军消息并更新 `mCity[i].nWid[0] = nID`；若武士无效或已死则将该槽置 -1。蓝方武士的处理逻辑与红方对称，从右向左读 `old[i+1][1]`。行军到达对方司令部时打印 `\"reached\"` 消息并将对方的 `nEnemy` 加一。\n\n两个相邻时间点共同实现城市生命元经济。\n\n`:20` 的逻辑极简：遍历城市 1 到 N，每座城市的 `nHP` 加 10，与城市内是否有武士无关。\n\n`:30` 遍历城市 1 到 N，对每座城市检查两次单方独占条件。若红方有人（`nWid[0] >= 0`）且蓝方无人（`nWid[1] < 0`），则红方武士打印收割消息，将城市 `nHP` 加入 `head[0].nTotalHP` 并将城市 `nHP` 清零；蓝方独占的判断对称。收割条件是\"一方有人、另一方无人\"：两方都有人的城市不能收割（即将开战，生命元悬而未决）；两方都没人的城市也无法收割。注意收割得到的生命元直接加到 `nTotalHP`，而战斗胜利赚到的则加到 `nTempHP`，两者在 `:50` 才合并，原因在 4.4.1 节中已解释。",
+          "code": "// warcraft4.cpp\n--snip--\n#define MinuteType 10\nint WorkMinute[MinuteType] = {0,5,10,20,30,35,38,40,50,55};\n\nvoid TimeProc(int hour, int mtype)\n{\n    if (mtype == 0) { /* :00 produce   */ head[0].Produce(hour); head[1].Produce(hour); return; }\n    if (mtype == 1) { /* :05 lion run  */ ... }\n    if (mtype == 2) { /* :10 march     */ ... return; }\n    if (mtype == 3) { /* :20 city +10  */ ... return; }\n    if (mtype == 4) { /* :30 harvest   */ ... return; }\n    if (mtype == 5) { /* :35 arrow     */ ... return; }\n    if (mtype == 6) { /* :38 bomb      */ BombPhase(hour); return; }   // ①\n    if (mtype == 7) { /* :40 fight     */ FightPhase(hour); return; }  // ①\n    if (mtype == 8) { /* :50 report HP */ ... return; }\n    if (mtype == 9) { /* :55 report arms */ ... return; }\n}\n\n// warcraft4.cpp\n--snip--\n    if (mtype == 1)  // :05 lion run\n    {\n        for (i = 1; i <= N; i++)\n            for (j = 0; j < 2; j++)\n                if (mCity[i].nWid[j] >= 0 &&\n                    head[j].w[mCity[i].nWid[j]].nKind  == 3 &&\n                    head[j].w[mCity[i].nWid[j]].nHP    >  0 &&\n                    head[j].w[mCity[i].nWid[j]].nLoyal <= 0)\n                {\n                    printf(\"%03d:05 %s lion %d ran away\\n\",\n                        hour, ColorName[j], mCity[i].nWid[j]+1);\n                    head[j].w[mCity[i].nWid[j]].nHP = 0;   // ①\n                }\n        for (j = 0; j < 2; j++)                            // ②\n            if (head[j].nCurWarrior >= 0)\n                if (head[j].w[head[j].nCurWarrior].nKind  == 3 &&\n                    head[j].w[head[j].nCurWarrior].nLoyal <= 0)\n                {\n                    printf(\"%03d:05 %s lion %d ran away\\n\",\n                        hour, ColorName[j], head[j].nCurWarrior+1);\n                    head[j].w[head[j].nCurWarrior].nHP = 0;\n                }\n    }\n\n// warcraft4.cpp\n--snip--\n    if (mtype == 2)  // :10 march\n    {\n        int old[23][2];\n        for (i = 1; i < 21; i++) { old[i][0] = mCity[i].nWid[0]; old[i][1] = mCity[i].nWid[1]; }\n        old[0][0] = head[0].nCurWarrior;  old[0][1] = -1;        // ①\n        old[N+1][0] = -1;                 old[N+1][1] = head[1].nCurWarrior;\n\n        for (i = 1; i <= N; i++)\n        {\n            int nID = old[i-1][0];   // red warrior marching into city i\n            if (nID >= 0 && nID < head[0].nTotalWarrior && head[0].w[nID].nHP > 0)\n            {\n                if (i%2 == 0 && head[0].w[nID].nKind == 2)   // ②\n                {\n                    head[0].w[nID].nHP -= 9;\n                    if (head[0].w[nID].nHP <= 0) head[0].w[nID].nHP = 1;\n                    head[0].w[nID].nAttack += 20;\n                }\n                printf(\"%03d:10 red %s %d marched to city %d with %d elements and force %d\\n\", ...);\n                mCity[i].nWid[0] = nID;\n            }\n            else mCity[i].nWid[0] = -1;\n            // ... 蓝方同理，条件为 (N-i)%2==1 ...\n        }\n        // ... 到达对方司令部时打印 reached 并 nEnemy++ ...\n        return;\n    }\n\n// warcraft4.cpp\n--snip--\n    if (mtype == 3)  // :20 city accumulates HP\n    {\n        for (i = 1; i <= N; i++)\n            mCity[i].nHP += 10;   // ①\n        return;\n    }\n    if (mtype == 4)  // :30 lone warrior harvests\n    {\n        for (i = 1; i <= N; i++)\n        {\n            if (mCity[i].nWid[0] >= 0 && mCity[i].nWid[1] < 0)   // ②\n            {\n                printf(\"%03d:30 red %s %d earned %d elements for his headquarter\\n\", ...);\n                head[0].nTotalHP += mCity[i].nHP;\n                mCity[i].nHP      = 0;\n            }\n            if (mCity[i].nWid[1] >= 0 && mCity[i].nWid[0] < 0)   // ②\n            {\n                printf(\"%03d:30 blue %s %d earned %d elements for his headquarter\\n\", ...);\n                head[1].nTotalHP += mCity[i].nHP;\n                mCity[i].nHP      = 0;\n            }\n        }\n        return;\n    }",
+          "learning_goal": "先跑通 05/10/20/30 的时间节奏，形成调度骨架。",
+          "source_section_refs": [
+            "4.5.1",
+            "4.5.2",
+            "4.5.3"
+          ],
+          "code_block_refs": [
+            "4.5.1",
+            "4.5.2",
+            "4.5.3"
+          ],
+          "prerequisites": [
+            "task_v4_produce",
+            "task_v4_city_flag_rule"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v4.D",
+      "h2_title": "补全战斗阶段细节",
+      "sections": [
+        {
+          "section_id": "v4.D.1",
+          "task_id": "task_v4_phase_arrow_bomb",
+          "title": "实现箭矢与炸弹阶段",
+          "description": "学习目标：处理正式战斗前的远程与先发判定逻辑。\n\n每小时第 35 分，持有箭矢的武士向相邻城市的敌人射击。\n\n代码遍历城市 1 到 N，对每座城市的红蓝两个武士槽分别检查：取本城武士下标 `nID` 和射击目标下标 `nID2`——红方（j=0）射向右侧城市 `mCity[i+1]` 的蓝方武士，蓝方（j=1）射向左侧城市 `mCity[i-1]` 的红方武士，通过三目运算 `j == 0 ? mCity[i+1].nWid[1] : mCity[i-1].nWid[0]` 完成方向切换。\n\n若本城武士有效（`nID >= 0`）、目标有效（`nID2 >= 0`）且本城武士持有剩余箭矢（`nArms[2].nTimes > 0`），则将箭矢次数减一，对目标造成固定伤害 `R`（全局输入值，不随战斗衰减）。若目标 HP 降至 0 以下，打印 `\"shot and killed\"` 消息；否则打印 `\"shot\"` 消息。被射杀的武士不会再参加后续 `:38` 和 `:40` 的战斗——`BombPhase` 和 `FightPhase` 开头都有 `nHP <= 0` 的跳过判断。\n\n> **注意：** 箭矢射击发生在战斗之前，被射杀的武士不会再参加 `:38` 和 `:40` 的战斗——`BombPhase` 和 `FightPhase` 开头都有 `nHP <= 0` 的跳过判断。\n\n在主战开始前，即将处于下风的武士可以引爆炸弹与敌人同归于尽。`BombPhase()` 接受当前小时数 `hour`，遍历城市 1 到 N。\n\n对每座城市，先取红蓝武士下标到 `nID[0]` 和 `nID[1]`：若任一方无人或任一方已死，直接跳过该城市。随后对红蓝两方（`j` = 0 和 1）分别判断是否引爆：只有持有炸弹（`nArms[1].nTimes > 0`）的武士才进入引爆判断。\n\n判断分先攻和后攻两条路径，先攻的判定规则与 `:40` 正式战斗相同：城市有旗帜则旗帜方先攻；无旗帜时奇数城市红先（`i%2==1`），偶数城市蓝先。\n\n若 `j` 方先攻，引爆需同时满足四个条件：先攻方一刀杀不死敌人（`head[1-j].w[nID[1-j]].nHP > 先攻方攻击力+剑附加`，若能直接杀死就没必要同归于尽）；敌方不是 ninja（ninja 不反击，就算打不死也不用炸）；先攻方若正常反击将会被杀（`先攻方HP <= 敌方攻击力/2 + 剑附加`，即承受后攻方折半还击后将死亡）。\n\n若 `j` 方后攻，判断更严格：只要敌人发动完整攻击（不折半）能杀掉自己（`自己HP <= 敌方攻击力 + 剑附加`），就立刻引爆——后手方要先承受先攻方的全力一击才能还击，生存压力更大。\n\n引爆后将双方 HP 均清 0，后续 `FightPhase` 的 `nHP <= 0` 检查会直接跳过该城市，炸弹的 `nTimes` 不需要显式递减，因为武士已经死亡。\n\n> **注意：** 炸弹引爆后两方 HP 均清 0，后续 `FightPhase` 开头的 `nHP <= 0` 检查会直接跳过该城市，不会再打印攻击消息。炸弹的 `nTimes` 不需要显式递减，因为武士已经死亡。",
+          "code": "// warcraft4.cpp\n--snip--\n    if (mtype == 5)  // :35 arrow shooting\n    {\n        int nID, nID2;\n        for (i = 1; i <= N; i++)\n        {\n            for (j = 0; j < 2; j++)\n            {\n                nID  = mCity[i].nWid[j];\n                nID2 = (j == 0) ? mCity[i+1].nWid[1] : mCity[i-1].nWid[0];   // ①\n                if (nID >= 0 && nID2 >= 0 && head[j].w[nID].nArms[2].nTimes > 0)\n                {\n                    head[j].w[nID].nArms[2].nTimes--;\n                    head[1-j].w[nID2].nHP -= R;                                 // ②\n                    if (head[1-j].w[nID2].nHP <= 0)\n                        printf(\"%03d:35 %s %s %d shot and killed %s %s %d\\n\", ...);\n                    else\n                        printf(\"%03d:35 %s %s %d shot\\n\", ...);\n                }\n            }\n        }\n        return;\n    }\n\n// warcraft4.cpp\n--snip--\nvoid BombPhase(int hour)\n{\n    int nID[2];\n    for (int i = 1; i <= N; i++)\n    {\n        nID[0] = mCity[i].nWid[0];  nID[1] = mCity[i].nWid[1];\n        if (nID[0] < 0 || nID[1] < 0) continue;\n        if (head[0].w[nID[0]].nHP <= 0 || head[1].w[nID[1]].nHP <= 0) continue;\n        for (int j = 0; j < 2; j++)\n        {\n            if (head[j].w[nID[j]].nArms[1].nTimes > 0)   // j has bomb\n            {\n                if (mCity[i].nFlag == j ||\n                    (mCity[i].nFlag == -1 && i % 2 == 1 - j))   // ①  j attacks first\n                {\n                    if (head[1-j].w[nID[1-j]].nHP >                  // ②  cannot kill enemy\n                            (head[j].w[nID[j]].nAttack +\n                             head[j].w[nID[j]].nArms[0].nAttack))\n                        if (head[1-j].w[nID[1-j]].nKind != 1)        // ③  enemy not ninja\n                            if (head[j].w[nID[j]].nHP <=             // ④  will be killed\n                                    (head[1-j].w[nID[1-j]].nAttack / 2 +\n                                     head[1-j].w[nID[1-j]].nArms[0].nAttack))\n                            {\n                                printf(\"%03d:38 %s %s %d used a bomb and killed %s %s %d\\n\", ...);\n                                head[j].w[nID[j]].nHP      = 0;\n                                head[1-j].w[nID[1-j]].nHP  = 0;\n                                continue;\n                            }\n                }\n                else   // j attacks second, full enemy attack (not halved)\n                {\n                    if (head[j].w[nID[j]].nHP <=\n                            (head[1-j].w[nID[1-j]].nAttack +\n                             head[1-j].w[nID[1-j]].nArms[0].nAttack))   // ⑤\n                    {\n                        printf(\"%03d:38 %s %s %d used a bomb and killed %s %s %d\\n\", ...);\n                        head[j].w[nID[j]].nHP = 0;  head[1-j].w[nID[1-j]].nHP = 0;\n                        continue;\n                    }\n                }\n            }\n        }\n    }\n}",
+          "learning_goal": "处理正式战斗前的远程与先发判定逻辑。",
+          "source_section_refs": [
+            "4.5.4",
+            "4.5.5"
+          ],
+          "code_block_refs": [
+            "4.5.4",
+            "4.5.5"
+          ],
+          "prerequisites": [
+            "task_v4_timeproc_skeleton"
+          ]
+        },
+        {
+          "section_id": "v4.D.2",
+          "task_id": "task_v4_phase_fight",
+          "title": "实现正式战斗与结算",
+          "description": "学习目标：完成攻击、反击、胜负判定与奖励结算。\n\n战斗按先后手顺序展开。`FightPhase()` 遍历城市 1 到 N，取红蓝武士下标；若任一方无人则跳过；若双方均已死亡（HP 均 <= 0）则跳过——注意此处条件是\"均已死亡\"，因为炸弹同归于尽时两方 HP 都清零，而箭矢射杀只清一方，这里用 `&&` 确保不遗漏单边存活的情况。\n\n对每座城市，用与 `BombPhase` 相同的先手判定找到先攻方 `j`：城市有旗帜则旗帜方先攻，无旗帜时奇数城市红先、偶数城市蓝先。若双方均存活，先攻方 `j` 发动攻击：本轮攻击力等于基础攻击力 `nAttack` 加剑的附加攻击力 `nArms[0].nAttack`；攻击完成后剑的附加攻击力乘以 0.8 衰减（整数截断），这是剑独有的特性（炸弹和箭矢以次数计数，不存在衰减）；将该伤害从敌方 HP 扣除并打印攻击消息。\n\n若敌方 HP 降至 0 以下，打印\"was killed\"消息，随后检查死亡武士是否为 lion：若是，胜方从 lion 的死亡中回复生命值，计算方式为 `nHP（已为负值）+ temp`，即最后一击的伤害量减去超额杀伤，等效于\"吸收回 lion 死亡前本来剩余的 HP\"。\n\n若敌方存活且不是 ninja（ninja 不还击），则触发还击：还击攻击力为敌方基础攻击力折半（`/ 2`）加剑附加，同样衰减剑附加，扣减先攻方 HP 并打印还击消息；若先攻方因还击死亡，打印\"was killed\"消息并检查是否为 lion 触发吸血。\n\n接上一小节，战斗结束后依次处理 dragon 欢呼、wolf 缴获、城市赚钱、旗帜更新和司令部补血。\n\n**dragon 欢呼**：若先攻方是 dragon，根据战局调整士气——敌人仍存活则士气减 0.2，敌人已死则士气加 0.2；无论胜负都调整。若 dragon 自身存活且调整后士气超过 0.8，打印欢呼消息。\n\n**胜者结算**：若先攻方 `j` 存活而敌方已死，打印赢得生命元的消息，将城市 `nHP` 存入 `head[j].nTempHP`（而非 `nTotalHP`）并清零城市，调用 `mCity[i].SetWin(j, hour, i)` 更新旗帜；若获胜方是 wolf，逐槽检查——只在 wolf 自己对应槽为空时才从敌人那里复制武器（`nAttack <= 0` 或 `nTimes <= 0`），不会覆盖已有的武器，一场胜利最多为 wolf 补齐三种武器但不会\"降级\"。对称地处理后攻方获胜的情况。\n\n**平局结算**：若双方均存活或均死亡，双方 lion 的忠诚度各减 K（连续平局最终让忠诚度归零并逃跑），调用 `mCity[i].SetWin(-1, hour, i)` 断开连胜链条。\n\n**司令部补血**：所有城市战斗处理完毕后，红方司令部按城市编号**从大到小**倒序遍历（优先补给靠近蓝方司令部的前线武士），对每座红方获胜（红方存活且蓝方已死）的城市，从 `nTotalHP` 中补给获胜武士最多 8 点 HP（若剩余不足 8 点则全部补出）。蓝方司令部对称地按城市编号**从小到大**正序遍历并补血。",
+          "code": "// warcraft4.cpp\n--snip--\nvoid FightPhase(int hour)\n{\n    int nID[2];\n    int i, j;\n    for (i = 1; i <= N; i++)\n    {\n        nID[0] = mCity[i].nWid[0];  nID[1] = mCity[i].nWid[1];\n        if (nID[0] < 0 || nID[1] < 0) continue;\n        if (head[0].w[nID[0]].nHP <= 0 && head[1].w[nID[1]].nHP <= 0) continue;\n\n        for (j = 0; j < 2; j++)\n        {\n            if (mCity[i].nFlag == j || (mCity[i].nFlag == -1 && i % 2 == 1 - j))\n            {\n                if (head[j].w[nID[j]].nHP > 0 && head[1-j].w[nID[1-j]].nHP > 0)\n                {\n                    printf(\"%03d:40 %s %s %d attacked %s %s %d in city %d with ...\\n\", ...);\n                    int temp = head[j].w[nID[j]].nAttack + head[j].w[nID[j]].nArms[0].nAttack;   // ①\n                    head[1-j].w[nID[1-j]].nHP         -= temp;\n                    head[j].w[nID[j]].nArms[0].nAttack *= 0.8;                                    // ②\n                    if (head[1-j].w[nID[1-j]].nHP <= 0)\n                    {\n                        printf(\"%03d:40 %s %s %d was killed in city %d\\n\", ...);\n                        if (head[1-j].w[nID[1-j]].nKind == 3)                                     // ③\n                            head[j].w[nID[j]].nHP += head[1-j].w[nID[1-j]].nHP + temp;\n                    }\n                    else if (head[1-j].w[nID[1-j]].nKind != 1)   // ④ not ninja: fight back\n                    {\n                        printf(\"%03d:40 %s %s %d fought back against ...\\n\", ...);\n                        temp = head[1-j].w[nID[1-j]].nAttack / 2 +\n                               head[1-j].w[nID[1-j]].nArms[0].nAttack;\n                        head[j].w[nID[j]].nHP                     -= temp;\n                        head[1-j].w[nID[1-j]].nArms[0].nAttack   *= 0.8;\n                        if (head[j].w[nID[j]].nHP <= 0)\n                        {\n                            printf(\"%03d:40 %s %s %d was killed in city %d\\n\", ...);\n                            if (head[j].w[nID[j]].nKind == 3)                                     // ③\n                                head[1-j].w[nID[1-j]].nHP += head[j].w[nID[j]].nHP + temp;\n                        }\n                    }\n                }\n                --snip--\n\n// warcraft4.cpp（接上）\n                --snip--\n                if (head[j].w[nID[j]].nKind == 0)   // dragon yell\n                {\n                    if (head[1-j].w[nID[1-j]].nHP > 0)\n                        head[j].w[nID[j]].nMorale -= 0.2;\n                    else\n                        head[j].w[nID[j]].nMorale += 0.2;                                 // ①\n                    if (head[j].w[nID[j]].nHP > 0 && head[j].w[nID[j]].nMorale > 0.8)\n                        printf(\"%03d:40 %s dragon %d yelled in city %d\\n\", ...);\n                }\n                if (head[j].w[nID[j]].nHP > 0 && head[1-j].w[nID[1-j]].nHP <= 0)  // j wins\n                {\n                    printf(\"%03d:40 %s %s %d earned %d elements ...\\n\", ...);\n                    head[j].nTempHP += mCity[i].nHP;\n                    mCity[i].nHP = 0;\n                    mCity[i].SetWin(j, hour, i);                                          // ②\n                    if (head[j].w[nID[j]].nKind == 4)  // wolf loots weapons\n                    {\n                        if (head[j].w[nID[j]].nArms[0].nAttack <= 0)\n                            head[j].w[nID[j]].nArms[0].nAttack = head[1-j].w[nID[1-j]].nArms[0].nAttack;\n                        if (head[j].w[nID[j]].nArms[1].nTimes  <= 0)\n                            head[j].w[nID[j]].nArms[1].nTimes  = head[1-j].w[nID[1-j]].nArms[1].nTimes;\n                        if (head[j].w[nID[j]].nArms[2].nTimes  <= 0)\n                            head[j].w[nID[j]].nArms[2].nTimes  = head[1-j].w[nID[1-j]].nArms[2].nTimes;  // ③\n                    }\n                }\n                else if (...)  // 1-j wins（对称逻辑）\n                { ... }\n                else  // draw\n                {\n                    if (head[j].w[nID[j]].nKind     == 3) head[j].w[nID[j]].nLoyal     -= K;\n                    if (head[1-j].w[nID[1-j]].nKind == 3) head[1-j].w[nID[1-j]].nLoyal -= K;  // ④\n                    mCity[i].SetWin(-1, hour, i);\n                }\n                break;\n            }\n        }\n    }\n    // red HQ sends up to 8 HP to each winning city\n    for (i = N; i >= 1; i--)\n    {\n        nID[0] = mCity[i].nWid[0];  nID[1] = mCity[i].nWid[1];\n        if (nID[0] < 0 || nID[1] < 0) continue;\n        if (head[0].w[nID[0]].nHP > 0 && head[1].w[nID[1]].nHP <= 0)   // red won\n        {\n            if (head[0].nTotalHP >= 8) { head[0].w[nID[0]].nHP += 8; head[0].nTotalHP -= 8; }\n            else { head[0].w[nID[0]].nHP += head[0].nTotalHP; head[0].nTotalHP = 0; }   // ⑤\n        }\n    }\n    // blue HQ（对称逻辑，遍历方向改为正序）\n    for (i = 1; i <= N; i++) { ... }\n}",
+          "learning_goal": "完成攻击、反击、胜负判定与奖励结算。",
+          "source_section_refs": [
+            "4.5.6",
+            "4.5.7"
+          ],
+          "code_block_refs": [
+            "4.5.6",
+            "4.5.7"
+          ],
+          "prerequisites": [
+            "task_v4_phase_arrow_bomb"
+          ]
+        },
+        {
+          "section_id": "v4.D.3",
+          "task_id": "task_v4_phase_report",
+          "title": "实现生命元与武器报告",
+          "description": "学习目标：补齐 50/55 报告阶段，形成完整时间线输出。\n\n两个报告型时间点，代码较短但包含几处细节。\n\n`:50` 报告遍历红蓝两方：将各方的 `nTempHP` 并入 `nTotalHP` 并清零 `nTempHP`——战斗赚到的钱在这里才\"入账\"，这就是为什么 `:40` 战斗时赢得的生命元要先存临时变量，防止当轮赚到的钱立刻被再次花出去；随后打印 `\"HHH:50 N elements in color headquarter\"` 消息。\n\n`:55` 报告分两段。红方按武士编号从高到低（`i` 从 `nTotalWarrior-1` 倒序到 0）打印，跳过已死亡（HP <= 0）的武士；蓝方从低到高（`i` 从 0 正序）打印，同样跳过死亡武士——这样同阵营内靠近对方的武士先报告（红方最高编号最靠前，蓝方最低编号最靠前）。\n\n每名存活武士的武器报告用布尔变量 `b` 标记\"还没打印任何武器\"，初始为 `true`。打印顺序固定为 arrow → bomb → sword：若 `nArms[2].nTimes > 0` 则打印 `arrow(N)`；若 `nArms[1].nTimes > 0` 则打印 `bomb`；若 `nArms[0].nAttack > 0` 则打印 `sword(N)`。相邻武器之间用逗号分隔（`if (!b) printf(\",\")`，`b` 置 `false`）。若三种武器都没有（`b` 仍为 `true`），打印 `no weapon` 并换行；否则打印完最后一件武器后换行。",
+          "code": "// warcraft4.cpp\n--snip--\n    if (mtype == 8)  // :50 report HP\n    {\n        for (i = 0; i < 2; i++)\n        {\n            head[i].nTotalHP += head[i].nTempHP;   // ①\n            head[i].nTempHP   = 0;\n            printf(\"%03d:50 %d elements in %s headquarter\\n\",\n                hour, head[i].nTotalHP, ColorName[i]);\n        }\n        return;\n    }\n    if (mtype == 9)  // :55 report arms\n    {\n        for (i = head[0].nTotalWarrior-1; i >= 0; i--)   // ②  red: high to low\n        {\n            if (head[0].w[i].nHP <= 0) continue;\n            printf(\"%03d:55 red %s %d has \", hour, WarriorName[head[0].w[i].nKind], i+1);\n            bool b = true;\n            if (head[0].w[i].nArms[2].nTimes  > 0) { b = false; printf(\"arrow(%d)\", head[0].w[i].nArms[2].nTimes); }\n            if (head[0].w[i].nArms[1].nTimes  > 0) { if (!b) printf(\",\"); b = false; printf(\"bomb\"); }\n            if (head[0].w[i].nArms[0].nAttack > 0) { if (!b) printf(\",\"); b = false; printf(\"sword(%d)\", head[0].w[i].nArms[0].nAttack); }\n            if (b) printf(\"no weapon\\n\"); else printf(\"\\n\");   // ③\n        }\n        for (i = 0; i < head[1].nTotalWarrior; i++) { /* blue: low to high, 同理 */ ... }\n        return;\n    }",
+          "learning_goal": "补齐 50/55 报告阶段，形成完整时间线输出。",
+          "source_section_refs": [
+            "4.5.8"
+          ],
+          "code_block_refs": [
+            "4.6"
+          ],
+          "prerequisites": [
+            "task_v4_phase_fight"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v4.E",
+      "h2_title": "组装主循环",
+      "sections": [
+        {
+          "section_id": "v4.E.1",
+          "task_id": "task_v4_main_assemble",
+          "title": "实现 run 与 work 主循环",
+          "description": "学习目标：把调度中心与所有阶段串成可运行完整程序。\n\n`run()` 负责处理一组测试数据。首先用 `cin >> M >> N >> R >> K >> T` 读入五个全局参数（顺序严格与输入格式对应，比第 3 章多了 R）；随后两轮 `for` 循环分别将五种武士的初始 HP 和初始攻击力读入全局数组 `WarriorHP[WarriorKinds]` 和 `WarriorAttack[WarriorKinds]`；然后用循环 `for (i=0; i<=21; i++) mCity[i].init()` 初始化全部 22 个城市节点，再调用 `head[0].init(M, 0)` 和 `head[1].init(M, 1)` 分别初始化红蓝司令部。\n\n主循环用变量 `nHour` 记录当前小时、`i` 记录当前时间槽索引（0 到 9）。每轮计算绝对分钟数 `cur_time = nHour * 60 + WorkMinute[i]`，若超过 T 则退出——注意是严格大于，等于 T 的那一分钟仍然处理。调用 `TimeProc(nHour, i)` 处理当前时间槽。在 `mtype == 2`（`:10` 行军，索引 2）之后检查司令部是否被攻占（`nEnemy >= 2`）：只有行军完成后才检查，避免上一局残余数据误触。时间槽索引 `i` 自增，到达 `MinuteType`（10）时归零并将 `nHour` 加一，实现小时进位。\n\n`work()` 读入测试组数，对每组打印 `\"Case N:\"` 后调用 `run()`。\n\n`main()` 只调用 `work()` 并返回 0。\n\n如果此时编译并运行程序，输入样例：\n\n```\n1\n200 6 12 24 733\n21 23 65 22 19\n17 23 14 33 67\n```\n\n你应该看到如下输出（节选前几行）：\n\n```\nCase 1:\n000:00 red iceman 1 born\n000:00 blue lion 1 born\nIts loyalty is 178\n000:10 red iceman 1 marched to city 1 with 65 elements and force 14\n000:10 blue lion 1 marched to city 6 with 22 elements and force 33\n000:30 red iceman 1 earned 10 elements for his headquarter\n000:30 blue lion 1 earned 10 elements for his headquarter\n000:50 145 elements in red headquarter\n000:50 188 elements in blue headquarter\n000:55 red iceman 1 has bomb\n000:55 blue lion 1 has no weapon\n```\n\n红方初始 200 生命元，生产 iceman 1（HP=65）后剩 135；`:30` 赚取城市 1 的 10 点，到 `:50` 报告时为 145。蓝方生产 lion 1（HP=22，忠诚度=178）后剩 178，同样在 `:30` 赚 10 点，报告时为 188。iceman 1 的编号为 1（nID%3=1），初始带炸弹；lion 1 不持有任何武器。",
+          "code": "// warcraft4.cpp\n--snip--\n    if (mtype == 8)  // :50 report HP\n    {\n        for (i = 0; i < 2; i++)\n        {\n            head[i].nTotalHP += head[i].nTempHP;   // ①\n            head[i].nTempHP   = 0;\n            printf(\"%03d:50 %d elements in %s headquarter\\n\",\n                hour, head[i].nTotalHP, ColorName[i]);\n        }\n        return;\n    }\n    if (mtype == 9)  // :55 report arms\n    {\n        for (i = head[0].nTotalWarrior-1; i >= 0; i--)   // ②  red: high to low\n        {\n            if (head[0].w[i].nHP <= 0) continue;\n            printf(\"%03d:55 red %s %d has \", hour, WarriorName[head[0].w[i].nKind], i+1);\n            bool b = true;\n            if (head[0].w[i].nArms[2].nTimes  > 0) { b = false; printf(\"arrow(%d)\", head[0].w[i].nArms[2].nTimes); }\n            if (head[0].w[i].nArms[1].nTimes  > 0) { if (!b) printf(\",\"); b = false; printf(\"bomb\"); }\n            if (head[0].w[i].nArms[0].nAttack > 0) { if (!b) printf(\",\"); b = false; printf(\"sword(%d)\", head[0].w[i].nArms[0].nAttack); }\n            if (b) printf(\"no weapon\\n\"); else printf(\"\\n\");   // ③\n        }\n        for (i = 0; i < head[1].nTotalWarrior; i++) { /* blue: low to high, 同理 */ ... }\n        return;\n    }\n\n// warcraft4.cpp\n--snip--\nvoid run()\n{\n    cin >> M >> N >> R >> K >> T;   // ①\n    int i;\n    for (i = 0; i < WarriorKinds; i++) cin >> WarriorHP[i];\n    for (i = 0; i < WarriorKinds; i++) cin >> WarriorAttack[i];\n    for (i = 0; i <= 21; i++) mCity[i].init();\n    head[0].init(M, 0);\n    head[1].init(M, 1);\n    int nHour = 0;\n    i = 0;\n    while (true)\n    {\n        int cur_time = nHour * 60 + WorkMinute[i];\n        if (cur_time > T) break;       // ②\n        TimeProc(nHour, i);\n        if (i == 2)                    // ③\n        {\n            if (head[0].nEnemy >= 2 || head[1].nEnemy >= 2) break;\n        }\n        i++;\n        if (i == MinuteType) { i = 0; nHour++; }\n    }\n}\n\nvoid work()\n{\n    int nCase;\n    cin >> nCase;\n    for (int i = 1; i <= nCase; i++) { printf(\"Case %d:\\n\", i); run(); }\n}\n\nint main() { work(); return 0; }",
+          "learning_goal": "把调度中心与所有阶段串成可运行完整程序。",
+          "source_section_refs": [
+            "4.6"
+          ],
+          "code_block_refs": [
+            "4.6",
+            "4.7"
+          ],
+          "prerequisites": [
+            "task_v4_phase_report"
+          ]
+        }
+      ]
+    }
+  ],
+  "debug_task_id": "task_debug"
+}

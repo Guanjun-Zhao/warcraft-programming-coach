@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.env
+.venv/
+venv/
+data/version*/state.json
+data/version*/code.cpp
+data/version*/history/
+data/app_settings.json

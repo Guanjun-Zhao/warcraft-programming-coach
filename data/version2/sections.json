@@ -1,0 +1,185 @@
+{
+  "planning": {
+    "section_id": "v2.plan",
+    "task_id": "task_v2_plan",
+    "title": "功能设计",
+    "description": "在上一章中，五种武士的降生消息格式完全相同，我们只用一个 `Warrior` 类就处理完了全部逻辑。这一章的题目在此基础上增加了新需求：dragon 有士气和武器，ninja 有两件武器，iceman 有一件武器，lion 有忠诚度，wolf 什么都没有——五种武士的**属性和打印格式各不相同**。\n如果仍然用一个类来描述所有武士，类里就需要堆满\"如果是 dragon 就…否则如果是 ninja 就…\"的判断，代码会越来越臃肿。C++ 为这种场景提供了一个更优雅的方案：**继承**。我们把所有武士共有的属性和行为放在基类 `CWarrior` 里，再为每种武士单独派生一个子类，让每个子类自己负责自己独特的属性和打印逻辑。\n在本章中，你还将学到**虚函数**和**多态**——它们让司令部的 `Produce()` 方法可以统一调用 `PrintResult()`，而无需关心当前这名武士究竟是哪种类型。\n> **注意：** 本章的代码在上一章的基础上修改。类名前缀从 `Warrior`/`Headquarter` 改为 `CWarrior`/`CHeadquarter`（C 代表 Class），这是很多 C++ 项目的命名惯例，有助于在代码中快速区分类名和变量名。\n\n与上一章相比，这次的改动集中在三处：\n第一，新增一个 `CWeapon` 类，用来描述武器的种类和攻击力。第二，把原来的 `Warrior` 类改造为**抽象基类** `CWarrior`，把公共的属性和降生消息的公共部分留在里面，再派生出 `CDragon`、`CNinja`、`CIceman`、`CLion`、`CWolf` 五个子类，每个子类各自处理自己独特的属性。第三，`CHeadquarter::Produce()` 里用 `switch` 语句，根据武士种类创建对应的子类对象。`CHeadquarter` 的整体结构基本不变，主函数几乎一字未动。",
+    "code": "",
+    "skip_code_verify": true,
+    "role": "planning",
+    "learning_goal": "先把新增规则和类继承关系理清，再进入代码细节。",
+    "source_section_refs": [
+      "__intro_planning__"
+    ],
+    "code_block_refs": []
+  },
+  "groups": [
+    {
+      "h2_id": "v2.A",
+      "h2_title": "先搭继承骨架",
+      "sections": [
+        {
+          "section_id": "v2.A.1",
+          "task_id": "task_v2_decl_weapon",
+          "title": "声明武器类与基础接口",
+          "description": "学习目标：建立武器抽象层，明确武器字段和可扩展接口。\n\n下面来创建 `CWeapon` 类，把三种武器的名称和攻击力统一管理。\n\n在宏定义 `WEAPON_NUM = 3` 之后声明 `CWeapon` 类。类的公开成员包括：整型 `nKindNo`（武器种类编号，0=sword，1=bomb，2=arrow）和整型 `nForce`（攻击力），这两个字段全部公开，各武士子类在构造时可以直接为自己的武器赋值。此外还有两个静态成员：整型数组 `InitialForce` 存放三种武器的初始攻击力，字符串指针数组 `Names` 存放三种武器的名称——静态成员在内存里只有一份，所有武器实例共享。",
+          "code": "// warcraft2.cpp\n--snip--\n#define WEAPON_NUM 3\n\nclass CWeapon\n{\n    public:\n        int nKindNo;                          // ①\n        int nForce;\n        static int InitialForce[WEAPON_NUM];  // ②\n        static const char* Names[WEAPON_NUM]; // ②\n};",
+          "learning_goal": "建立武器抽象层，明确武器字段和可扩展接口。",
+          "source_section_refs": [
+            "2.2"
+          ],
+          "code_block_refs": [
+            "2.2"
+          ],
+          "prerequisites": []
+        },
+        {
+          "section_id": "v2.A.2",
+          "task_id": "task_v2_decl_warrior_base",
+          "title": "改造 CWarrior 声明与虚函数",
+          "description": "学习目标：让基类承担通用逻辑，为子类多态留好入口。\n\n下面来重新声明 `CWarrior` 类。首先用 `enum` 定义五个具名常量 `DRAGON`、`NINJA`、`ICEMAN`、`LION`、`WOLF`，它们的值依次为 0、1、2、3、4，与 `InitialLifeValue` 数组的下标一一对应。写 `DRAGON` 比写 `0` 可读性好得多，也不容易出错。\n\n在前向声明 `class CHeadquarter;` 之后声明 `CWarrior` 类。与上一章相比有以下几处关键变化：\n\n成员访问控制从 `private` 改成了 `protected`。`private` 成员只有本类能访问，子类也访问不到；改成 `protected` 后，`pHeadquarter` 和 `nNo` 这两个成员在子类中同样可以直接读取——各武士子类在构造时都需要用到它们。\n\n公开部分包含两个 `PrintResult` 重载。第一个带两个参数（时间和武士种类），加了 `virtual` 关键字，负责打印所有武士共同的降生消息格式，可以被子类重写。第二个只带时间参数，声明为 `virtual void PrintResult(int nTime) = 0`，是**纯虚函数**：`= 0` 意味着基类不提供实现，强制要求每个子类必须自己实现；含有纯虚函数的类叫**抽象类**，不能直接创建对象，这完全符合我们的设计意图。\n\n最后，析构函数声明为 `virtual ~CWarrior() {}`。这一行非常重要：`Produce()` 里存储的是 `CWarrior*` 类型的指针，析构时调用 `delete pWarriors[i]`；如果析构函数不是虚的，`delete` 只会调用基类析构函数而跳过子类析构函数，导致子类的成员没有被正确释放。\n\n> **注意：** \"只要基类中有虚函数，析构函数就应该声明为虚的\"——这条规则记住了，以后用多态时就不会踩坑。",
+          "code": "// warcraft2.cpp\n--snip--\nenum { DRAGON, NINJA, ICEMAN, LION, WOLF };   // ①\n\nclass CHeadquarter;\nclass CWarrior\n{\n    protected:                                 // ②\n        CHeadquarter* pHeadquarter;\n        int nNo;\n    public:\n        static const char* Names[WARRIOR_NUM];\n        static int InitialLifeValue[WARRIOR_NUM];\n        CWarrior(CHeadquarter* p, int nNo_);\n        virtual void PrintResult(int nTime, int nKindNo);  // ③\n        virtual void PrintResult(int nTime) = 0;           // ④\n        virtual ~CWarrior() { }                            // ⑤\n};",
+          "learning_goal": "让基类承担通用逻辑，为子类多态留好入口。",
+          "source_section_refs": [
+            "2.3.1"
+          ],
+          "code_block_refs": [
+            "2.3.1"
+          ],
+          "prerequisites": [
+            "task_v2_decl_weapon"
+          ]
+        },
+        {
+          "section_id": "v2.A.3",
+          "task_id": "task_v2_decl_subclasses",
+          "title": "声明各武士子类结构",
+          "description": "学习目标：先把 dragon/ninja/iceman/lion/wolf 的差异字段和接口声明完整。\n\n`CDragon` 继承自 `CWarrior`，使用 `: public CWarrior` 语法声明。`public` 继承意味着基类的 `public` 和 `protected` 成员在子类中保持相同的访问权限。\n\n私有成员包含一个 `CWeapon` 对象 `wp` 和一个 `double` 类型的士气值 `fmorale`。\n\n构造函数使用**初始化列表**语法 `: CWarrior(p, nNo_)` 调用基类构造函数——这是 C++ 中子类构造函数向父类传参的标准写法，必须写在初始化列表里，不能在函数体内调用。函数体内，武器种类由 `nNo % WEAPON_NUM` 决定（编号 1 的 dragon 拿 sword，编号 2 的拿 bomb，编号 3 的拿 arrow，如此循环），并从 `CWeapon::InitialForce` 表中读取对应攻击力。士气值等于司令部在生产完这名 dragon **之后**的剩余生命元除以 dragon 的初始生命值，用浮点数存储；注意除法时必须强制转换为 `double`，否则整数除法会丢失小数部分。\n\n`PrintResult(int nTime)` 先调用 `CWarrior::PrintResult(nTime, DRAGON)` 打印公共的降生消息，再打印 dragon 特有的武器和士气信息。这种\"先调用基类版本，再追加子类内容\"的写法是 C++ 重写虚函数时的常见模式。\n\n`CNinja` 继承自 `CWarrior`，私有成员是一个长度为 2 的 `CWeapon` 数组 `wps`，结构上和 `CDragon` 只差一件武器。构造函数在初始化列表调用基类构造函数后，在函数体内为两件武器分别赋值：第一件的种类编号为 `nNo % 3`，第二件为 `(nNo + 1) % 3`，保证编号相邻但取模后不同。`PrintResult` 打印公共部分后，再输出两件武器的名称。\n\n`CIceman` 与 `CDragon` 结构几乎相同，只有一件武器，没有士气字段，`PrintResult` 打印公共部分后只追加一行武器名称。\n\n`CLion` 没有武器，但有一个 `int nLoyalty`（忠诚度）私有字段。构造函数和 `PrintResult` 都通过 `pHeadquarter->GetTotalLifeValue()` 读取司令部当前的剩余生命元来赋值或打印——题目要求打印的是降生**后**的剩余生命元，而构造函数在 `Produce()` 扣减生命元之后才被调用，所以两处读到的值相同，都是正确的结果。\n\n`CWolf` 最简单，没有任何额外属性，构造函数只调用基类构造函数，`PrintResult` 只调用基类版本，不追加任何内容。",
+          "code": "// warcraft2.cpp\n--snip--\nclass CDragon : public CWarrior   // ①\n{\n    private:\n        CWeapon wp;\n        double fmorale;\n    public:\n        CDragon(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)   // ②\n        {\n            wp.nKindNo = nNo % WEAPON_NUM;                        // ③\n            wp.nForce  = CWeapon::InitialForce[wp.nKindNo];\n            fmorale    = pHeadquarter->GetTotalLifeValue()\n                         / (double)CWarrior::InitialLifeValue[DRAGON];   // ④\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, DRAGON);   // ⑤\n            printf(\"It has a %s,and it's morale is %.2f\\n\",\n                   CWeapon::Names[wp.nKindNo], fmorale);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CNinja : public CWarrior\n{\n    private:\n        CWeapon wps[2];   // ①\n    public:\n        CNinja(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            wps[0].nKindNo = nNo % WEAPON_NUM;          // ②\n            wps[0].nForce  = CWeapon::InitialForce[wps[0].nKindNo];\n            wps[1].nKindNo = (nNo + 1) % WEAPON_NUM;   // ②\n            wps[1].nForce  = CWeapon::InitialForce[wps[1].nKindNo];\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, NINJA);\n            printf(\"It has a %s and a %s\\n\",\n                   CWeapon::Names[wps[0].nKindNo],\n                   CWeapon::Names[wps[1].nKindNo]);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CIceman : public CWarrior\n{\n    private:\n        CWeapon wp;\n    public:\n        CIceman(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            wp.nKindNo = nNo % WEAPON_NUM;\n            wp.nForce  = CWeapon::InitialForce[wp.nKindNo];\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, ICEMAN);\n            printf(\"It has a %s\\n\", CWeapon::Names[wp.nKindNo]);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CLion : public CWarrior\n{\n    private:\n        int nLoyalty;\n    public:\n        CLion(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            nLoyalty = pHeadquarter->GetTotalLifeValue();   // ①\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, LION);\n            nLoyalty = pHeadquarter->GetTotalLifeValue();   // ①\n            printf(\"It's loyalty is %d\\n\", nLoyalty);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CWolf : public CWarrior\n{\n    public:\n        CWolf(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_) { }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, WOLF);\n        }\n};",
+          "learning_goal": "先把 dragon/ninja/iceman/lion/wolf 的差异字段和接口声明完整。",
+          "source_section_refs": [
+            "2.4.1",
+            "2.4.2",
+            "2.4.3"
+          ],
+          "code_block_refs": [
+            "2.4.1",
+            "2.4.2",
+            "2.4.3"
+          ],
+          "prerequisites": [
+            "task_v2_decl_warrior_base"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v2.B",
+      "h2_title": "补通用行为与子类特性",
+      "sections": [
+        {
+          "section_id": "v2.B.1",
+          "task_id": "task_v2_impl_base_print",
+          "title": "实现基类 PrintResult 逻辑",
+          "description": "学习目标：掌握通用输出如何通过虚函数与子类特性拼接。\n\n`CWarrior` 的构造函数接受司令部指针 `p` 和武士编号 `nNo_`，直接赋给对应的 `protected` 成员。\n\n带两个参数的 `PrintResult(int nTime, int nKindNo)` 是所有子类共用的公共打印逻辑。它先调用 `pHeadquarter->GetColor(szColor)` 把颜色写入一个字符数组——注意这里 `GetColor()` 的签名与上一章不同，改成了接受 `char*` 参数并将结果写入其中，而不是返回 `string`。随后用 `printf` 按格式打印完整的降生消息，参数依次是时间、颜色、武士名称、编号、初始生命值、该类武士的已降生数量，以及结尾的 `in X headquarter`。每个子类的 `PrintResult(int nTime)` 都会先调用这个基类版本打印公共部分，再自己追加特有信息。",
+          "code": "// warcraft2.cpp\n--snip--\nCWarrior::CWarrior(CHeadquarter* p, int nNo_)\n{\n    nNo          = nNo_;\n    pHeadquarter = p;\n}\n\nvoid CWarrior::PrintResult(int nTime, int nKindNo)\n{\n    char szColor[20];\n    pHeadquarter->GetColor(szColor);   // ①\n    printf(\"%03d %s %s %d born with strength %d,%d %s in %s headquarter\\n\",\n           nTime, szColor, Names[nKindNo], nNo, InitialLifeValue[nKindNo],\n           pHeadquarter->anWarriorNum[nKindNo], Names[nKindNo], szColor);\n}",
+          "learning_goal": "掌握通用输出如何通过虚函数与子类特性拼接。",
+          "source_section_refs": [
+            "2.3.2"
+          ],
+          "code_block_refs": [
+            "2.3.2"
+          ],
+          "prerequisites": [
+            "task_v2_decl_subclasses"
+          ]
+        },
+        {
+          "section_id": "v2.B.2",
+          "task_id": "task_v2_impl_subclass_features",
+          "title": "实现各子类专属规则",
+          "description": "学习目标：把士气、双持、默认行为等规则落到具体子类实现。\n\n`CDragon` 继承自 `CWarrior`，使用 `: public CWarrior` 语法声明。`public` 继承意味着基类的 `public` 和 `protected` 成员在子类中保持相同的访问权限。\n\n私有成员包含一个 `CWeapon` 对象 `wp` 和一个 `double` 类型的士气值 `fmorale`。\n\n构造函数使用**初始化列表**语法 `: CWarrior(p, nNo_)` 调用基类构造函数——这是 C++ 中子类构造函数向父类传参的标准写法，必须写在初始化列表里，不能在函数体内调用。函数体内，武器种类由 `nNo % WEAPON_NUM` 决定（编号 1 的 dragon 拿 sword，编号 2 的拿 bomb，编号 3 的拿 arrow，如此循环），并从 `CWeapon::InitialForce` 表中读取对应攻击力。士气值等于司令部在生产完这名 dragon **之后**的剩余生命元除以 dragon 的初始生命值，用浮点数存储；注意除法时必须强制转换为 `double`，否则整数除法会丢失小数部分。\n\n`PrintResult(int nTime)` 先调用 `CWarrior::PrintResult(nTime, DRAGON)` 打印公共的降生消息，再打印 dragon 特有的武器和士气信息。这种\"先调用基类版本，再追加子类内容\"的写法是 C++ 重写虚函数时的常见模式。\n\n`CNinja` 继承自 `CWarrior`，私有成员是一个长度为 2 的 `CWeapon` 数组 `wps`，结构上和 `CDragon` 只差一件武器。构造函数在初始化列表调用基类构造函数后，在函数体内为两件武器分别赋值：第一件的种类编号为 `nNo % 3`，第二件为 `(nNo + 1) % 3`，保证编号相邻但取模后不同。`PrintResult` 打印公共部分后，再输出两件武器的名称。\n\n`CIceman` 与 `CDragon` 结构几乎相同，只有一件武器，没有士气字段，`PrintResult` 打印公共部分后只追加一行武器名称。\n\n`CLion` 没有武器，但有一个 `int nLoyalty`（忠诚度）私有字段。构造函数和 `PrintResult` 都通过 `pHeadquarter->GetTotalLifeValue()` 读取司令部当前的剩余生命元来赋值或打印——题目要求打印的是降生**后**的剩余生命元，而构造函数在 `Produce()` 扣减生命元之后才被调用，所以两处读到的值相同，都是正确的结果。\n\n`CWolf` 最简单，没有任何额外属性，构造函数只调用基类构造函数，`PrintResult` 只调用基类版本，不追加任何内容。",
+          "code": "// warcraft2.cpp\n--snip--\nclass CDragon : public CWarrior   // ①\n{\n    private:\n        CWeapon wp;\n        double fmorale;\n    public:\n        CDragon(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)   // ②\n        {\n            wp.nKindNo = nNo % WEAPON_NUM;                        // ③\n            wp.nForce  = CWeapon::InitialForce[wp.nKindNo];\n            fmorale    = pHeadquarter->GetTotalLifeValue()\n                         / (double)CWarrior::InitialLifeValue[DRAGON];   // ④\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, DRAGON);   // ⑤\n            printf(\"It has a %s,and it's morale is %.2f\\n\",\n                   CWeapon::Names[wp.nKindNo], fmorale);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CNinja : public CWarrior\n{\n    private:\n        CWeapon wps[2];   // ①\n    public:\n        CNinja(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            wps[0].nKindNo = nNo % WEAPON_NUM;          // ②\n            wps[0].nForce  = CWeapon::InitialForce[wps[0].nKindNo];\n            wps[1].nKindNo = (nNo + 1) % WEAPON_NUM;   // ②\n            wps[1].nForce  = CWeapon::InitialForce[wps[1].nKindNo];\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, NINJA);\n            printf(\"It has a %s and a %s\\n\",\n                   CWeapon::Names[wps[0].nKindNo],\n                   CWeapon::Names[wps[1].nKindNo]);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CIceman : public CWarrior\n{\n    private:\n        CWeapon wp;\n    public:\n        CIceman(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            wp.nKindNo = nNo % WEAPON_NUM;\n            wp.nForce  = CWeapon::InitialForce[wp.nKindNo];\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, ICEMAN);\n            printf(\"It has a %s\\n\", CWeapon::Names[wp.nKindNo]);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CLion : public CWarrior\n{\n    private:\n        int nLoyalty;\n    public:\n        CLion(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_)\n        {\n            nLoyalty = pHeadquarter->GetTotalLifeValue();   // ①\n        }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, LION);\n            nLoyalty = pHeadquarter->GetTotalLifeValue();   // ①\n            printf(\"It's loyalty is %d\\n\", nLoyalty);\n        }\n};\n\n// warcraft2.cpp\n--snip--\nclass CWolf : public CWarrior\n{\n    public:\n        CWolf(CHeadquarter* p, int nNo_) : CWarrior(p, nNo_) { }\n        void PrintResult(int nTime)\n        {\n            CWarrior::PrintResult(nTime, WOLF);\n        }\n};",
+          "learning_goal": "把士气、双持、默认行为等规则落到具体子类实现。",
+          "source_section_refs": [
+            "2.4.1",
+            "2.4.2",
+            "2.4.3"
+          ],
+          "code_block_refs": [
+            "2.4.1",
+            "2.4.2",
+            "2.4.3"
+          ],
+          "prerequisites": [
+            "task_v2_impl_base_print"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v2.C",
+      "h2_title": "重构生产与静态配置",
+      "sections": [
+        {
+          "section_id": "v2.C.1",
+          "task_id": "task_v2_produce_switch",
+          "title": "改造 Produce：用 switch 构造子类对象",
+          "description": "学习目标：将原先单类生产切换为按类型分派构造子类对象。\n\n`Produce()` 的整体逻辑和上一章完全相同——跳过造不起的武士、扣减生命元、打印停产消息。唯一的变化是创建武士对象的那一步，从一行 `new Warrior(...)` 变成了一段 `switch`：根据 `nKindNo` 分五个分支，分别用 `new` 创建对应子类的对象，把指针存入 `pWarriors` 数组。数组的类型是 `CWarrior*`——同一个指针类型指向任何一种子类对象，这正是**多态**的体现。\n\n创建完毕后，统一调用 `pWarriors[nTotalWarriorNum]->PrintResult(nTime)`。因为 `PrintResult(int nTime)` 是虚函数，C++ 会在运行时根据指针实际指向的对象类型，自动调用正确的子类版本。`Produce()` 完全不需要知道当前武士是什么类型，这就是多态带来的简洁。",
+          "code": "// warcraft2.cpp\n--snip--\nint CHeadquarter::Produce(int nTime)\n{\n    --snip--\n    nTotalLifeValue -= CWarrior::InitialLifeValue[nKindNo];\n    nCurMakingSeqIdx = (nCurMakingSeqIdx + 1) % WARRIOR_NUM;\n    anWarriorNum[nKindNo]++;\n    switch (nKindNo)                                                // ①\n    {\n        case DRAGON:\n            pWarriors[nTotalWarriorNum] = new CDragon(this, nTotalWarriorNum+1);\n            break;\n        case NINJA:\n            pWarriors[nTotalWarriorNum] = new CNinja(this, nTotalWarriorNum+1);\n            break;\n        case ICEMAN:\n            pWarriors[nTotalWarriorNum] = new CIceman(this, nTotalWarriorNum+1);\n            break;\n        case LION:\n            pWarriors[nTotalWarriorNum] = new CLion(this, nTotalWarriorNum+1);\n            break;\n        case WOLF:\n            pWarriors[nTotalWarriorNum] = new CWolf(this, nTotalWarriorNum+1);\n            break;\n    }\n    pWarriors[nTotalWarriorNum]->PrintResult(nTime);               // ②\n    nTotalWarriorNum++;\n    return 1;\n}",
+          "learning_goal": "将原先单类生产切换为按类型分派构造子类对象。",
+          "source_section_refs": [
+            "2.5"
+          ],
+          "code_block_refs": [
+            "2.5"
+          ],
+          "prerequisites": [
+            "task_v2_impl_subclass_features"
+          ]
+        },
+        {
+          "section_id": "v2.C.2",
+          "task_id": "task_v2_static_color",
+          "title": "完善 GetColor 与静态成员",
+          "description": "学习目标：保证颜色、武器名和静态表在新版结构中一致可用。\n\n`GetColor()` 的签名从上一章的\"返回 `string`\"改为接受 `char*` 参数并用 `strcpy` 写入：若 `nColor` 为 0 则写入 `\"red\"`，否则写入 `\"blue\"`。这样做是为了避免在 `printf` 的格式串中混用 `string` 和 `const char*`。\n\n文件末尾定义所有静态成员。`CWeapon::Names` 初始化为 `{\"sword\", \"bomb\", \"arrow\"}`，`CWeapon::InitialForce` 只申请内存，本题暂时不读入（为后续扩展预留）。`CWarrior::Names` 和 `CWarrior::InitialLifeValue` 与上一章相同。`CHeadquarter::MakingSeq` 的初始化数据不变，仍是 `{2,3,4,1,0}` 和 `{3,0,1,2,4}`。与上一章相比，这里多了 `CWeapon` 的两个静态成员定义。",
+          "code": "// warcraft2.cpp\n--snip--\nvoid CHeadquarter::GetColor(char* szColor)\n{\n    if (nColor == 0) strcpy(szColor, \"red\");\n    else             strcpy(szColor, \"blue\");\n}\n\n// warcraft2.cpp\n--snip--\nconst char* CWeapon::Names[WEAPON_NUM]     = {\"sword\", \"bomb\", \"arrow\"};\nint         CWeapon::InitialForce[WEAPON_NUM];\n\nconst char* CWarrior::Names[WARRIOR_NUM]   = {\"dragon\",\"ninja\",\"iceman\",\"lion\",\"wolf\"};\nint         CWarrior::InitialLifeValue[WARRIOR_NUM];\nint         CHeadquarter::MakingSeq[2][WARRIOR_NUM] = { {2,3,4,1,0}, {3,0,1,2,4} };",
+          "learning_goal": "保证颜色、武器名和静态表在新版结构中一致可用。",
+          "source_section_refs": [
+            "2.6"
+          ],
+          "code_block_refs": [
+            "2.6"
+          ],
+          "prerequisites": [
+            "task_v2_produce_switch"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v2.D",
+      "h2_title": "组装主流程",
+      "sections": [
+        {
+          "section_id": "v2.D.1",
+          "task_id": "task_v2_main_assemble",
+          "title": "主函数保持框架并接入新类型体系",
+          "description": "学习目标：在不破坏整体流程的前提下，完成新武士体系的集成。\n\n主函数的结构和上一章完全一样，改动只有类名前缀从 `Warrior`/`Headquarter` 改为 `CWarrior`/`CHeadquarter`。读入组数后，对每组数据打印 `Case:n`，读入生命元和五种武士的初始生命值，用 `Init()` 重置红蓝司令部，内层循环每轮先红后蓝各调用一次 `Produce()`，分别用 `tmp1`、`tmp2` 接收返回值，双方均返回 0 时退出。\n\n这正是继承和多态带来的好处：新增了五种子类、新增了武器系统，主函数却完全不需要修改。所有扩展都被封装在各自的类里，对外暴露的接口（`Produce()`、`PrintResult()`）保持不变。\n\n如果此时编译并运行程序，输入样例：\n\n```\n1\n20\n3 4 5 6 7\n```\n\n你应该看到如下输出：\n\n```\nCase:1\n000 red iceman 1 born with strength 5,1 iceman in red headquarter\nIt has a bomb\n000 blue lion 1 born with strength 6,1 lion in blue headquarter\nIt's loyalty is 14\n001 red lion 2 born with strength 6,1 lion in red headquarter\nIt's loyalty is 9\n001 blue dragon 2 born with strength 3,1 dragon in blue headquarter\nIt has a arrow,and it's morale is 3.67\n002 red wolf 3 born with strength 7,1 wolf in red headquarter\n002 blue ninja 3 born with strength 4,1 ninja in blue headquarter\nIt has a sword and a bomb\n003 red headquarter stops making warriors\n003 blue iceman 4 born with strength 5,1 iceman in blue headquarter\nIt has a bomb\n004 blue headquarter stops making warriors\n```",
+          "code": "// warcraft2.cpp\n--snip--\nint main()\n{\n    int t, m;\n    CHeadquarter RedHead, BlueHead;\n    scanf(\"%d\", &t);\n    int nCaseNo = 1;\n    while (t--)\n    {\n        printf(\"Case:%d\\n\", nCaseNo++);\n        scanf(\"%d\", &m);\n        for (int i = 0; i < WARRIOR_NUM; i++)\n            scanf(\"%d\", &CWarrior::InitialLifeValue[i]);\n        RedHead.Init(0, m);\n        BlueHead.Init(1, m);\n        int nTime = 0;\n        while (true)\n        {\n            int tmp1 = RedHead.Produce(nTime);\n            int tmp2 = BlueHead.Produce(nTime);\n            if (tmp1 == 0 && tmp2 == 0)\n                break;\n            nTime++;\n        }\n    }\n    return 0;\n}",
+          "learning_goal": "在不破坏整体流程的前提下，完成新武士体系的集成。",
+          "source_section_refs": [
+            "2.7"
+          ],
+          "code_block_refs": [
+            "2.7"
+          ],
+          "prerequisites": [
+            "task_v2_static_color"
+          ]
+        }
+      ]
+    }
+  ],
+  "debug_task_id": "task_debug"
+}

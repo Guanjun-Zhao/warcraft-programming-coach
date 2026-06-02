@@ -1,0 +1,277 @@
+{
+  "planning": {
+    "section_id": "v3.plan",
+    "task_id": "task_v3_plan",
+    "title": "功能设计",
+    "description": "在前两章里，武士只需要\"降生\"，程序随后立刻打印结果。这一章的世界大不相同——武士要在城市之间行军、相遇后要交战、lion 可能临阵逃跑、iceman 每走一步都会损失生命值，而所有这些事件都必须按时间和地点排好顺序再统一输出。\n事件的总数和顺序无法在发生时就确定，因此我们引入一个全新的设计思路：把所有发生的事件先收集起来，最后一次性排序输出。这就是本章的核心——**事件驱动架构**。与此同时，武器从上一章的简单数据升级为拥有各自行为的类，战斗逻辑也需要单独的方法来承载。\n本章新增的类和方法很多，但每一处都是为了解决一个具体问题。我们依然从\"规划\"入手，逐步添加各个模块。\n\n与上一章相比，这次的改动分为四个方向：\n第一，引入 `CKingdom` 类作为整个世界的\"指挥官\"，它持有红蓝两个司令部，按分钟推进时间，并在内部收集所有事件，最后排序输出。第二，引入 `CEvent` 类描述一条事件记录，重载 `operator<` 定义排序规则。第三，把上一章的 `CWeapon` 改造为继承体系：基类负责接口，`CSWord`、`CArrow`、`CBomb` 三个子类各自实现不同的攻击逻辑。第四，大幅扩展 `CWarrior`：武士现在拥有一组武器、当前位置和攻击力，并实现 `March()`、`Attack()`、`FightBack()` 等方法，各子类再按需覆盖特有行为。\n主函数和 `CHeadquarter` 的整体结构保留，但 `CHeadquarter` 内部的武士容器从数组改为 `list`，并增加了大量战场管理方法。",
+    "code": "",
+    "skip_code_verify": true,
+    "role": "planning",
+    "learning_goal": "先建立事件驱动战场模型，再逐层实现武器、武士和司令部行为。",
+    "source_section_refs": [
+      "__intro_planning__"
+    ],
+    "code_block_refs": []
+  },
+  "groups": [
+    {
+      "h2_id": "v3.A",
+      "h2_title": "先搭事件驱动骨架",
+      "sections": [
+        {
+          "section_id": "v3.A.1",
+          "task_id": "task_v3_decl_event_kingdom",
+          "title": "声明 CEvent 与 CKingdom 核心结构",
+          "description": "学习目标：明确事件对象与战场调度器的职责边界。\n\n所有发生的事情都被包装成一个 `CEvent` 对象，暂存在 `CKingdom` 的 `vEvent` 向量里，最后统一排序输出。先来写好 `CEvent` 的成员变量和函数声明。\n\n程序开头先定义枚举 `EEventType`，列出所有可能的事件类型：降生（`EVENT_BORN`）、lion逃跑（`EVENT_LION_RUN`）、行军（`EVENT_MARCH`）、wolf抢武器（`EVENT_WOLFSROB`）、战斗结果（`EVENT_FIGHT_RESULT`）、欢呼（`EVENT_YELL`）、获得生命元（`EVENT_EARNMONEY`）、到达敌方司令部（`EVENT_REACH`）、占领城市（`EVENT_CITYTAKEN`）、打印生命元（`EVENT_PRINTMONEY`）、武士报告（`EVENT_WARRIOR_REPORT`）。枚举值的**声明顺序就是同地同时事件的优先级**：值越小越先输出，例如 `EVENT_LION_RUN` 排在 `EVENT_MARCH` 之前，所以 lion 逃跑的事件先于行军事件打印。\n\n`CEvent` 类的私有成员共五个字段：事件类型 `eEventType`、发生时间 `nTime`（以分钟计）、发生城市 `nCityNo`、所属阵营 `nColor`，以及描述字符串 `sDescribe`。这五个字段共同唯一描述一条事件记录，排序和打印都依赖它们。\n\n公开部分只有一个构造函数和两个方法声明。构造函数接受与五个成员一一对应的五个参数，使用**成员初始化列表**完成所有成员的初始化，函数体为空 `{}`。C++ 推荐用初始化列表而非函数体内赋值来初始化成员——前者在成员被创建时直接初始化，不会多做一次默认构造。`Output()` 负责按格式打印这条事件，`operator<` 定义两条事件的大小比较规则，二者只在此声明，函数体在后面两节分别补上。\n\n`CKingdom` 是整个模拟的驱动核心，它持有两个司令部，按分钟逐步推进时间。先来写好它的成员变量和函数声明。\n\n`CKingdom` 声明 `CHeadquarter` 为友元类，以便司令部能访问 `CKingdom` 的私有成员（主要是 `nCityNum`）。私有成员包含五个字段：红蓝两个司令部对象 `Red` 和 `Blue` 作为**成员对象**直接嵌入，不是指针，也不是动态分配；当前时间 `nTimeInMinutes`（单位为分钟）；收集所有事件的向量 `vEvent`，整个模拟过程中所有 `AddEvent()` 调用都把事件追加到这里，直到最后才排序；战争结束时刻 `nEndTime`；以及城市数量 `nCityNum`。\n\n公开部分声明了六个方法：构造函数、`Run()` 负责驱动整个时间循环、`TimePass()` 是最关键的逐分钟调度方法、`OutputResult()` 在最后统一排序输出、`AddEvent()` 供所有模块追加事件、`WarEnd()` 记录战争结束时刻。",
+          "code": "// warcraft3.cpp\nenum EEventType { EVENT_BORN, EVENT_LION_RUN, EVENT_MARCH, EVENT_WOLFSROB,\n                  EVENT_FIGHT_RESULT, EVENT_YELL, EVENT_EARNMONEY,\n                  EVENT_REACH, EVENT_CITYTAKEN, EVENT_PRINTMONEY,\n                  EVENT_WARRIOR_REPORT };   // ①\n\nclass CEvent\n{\nprivate:\n    EEventType eEventType;   // ②\n    int nTime;\n    int nCityNo;\n    int nColor;\n    string sDescribe;\npublic:\n    CEvent(EEventType eEventType_, int nTime_, int nCityNo_,\n           int nColor_, const string & s) :\n        eEventType(eEventType_), nTime(nTime_),\n        nCityNo(nCityNo_), nColor(nColor_), sDescribe(s) {}   // ③\n    void Output();\n    bool operator<(const CEvent & e2) const;\n};\n\n// warcraft3.cpp\n--snip--\nclass CKingdom\n{\n    friend class CHeadquarter;\nprivate:\n    CHeadquarter Red, Blue;    // ①\n    int nTimeInMinutes;\n    vector<CEvent> vEvent;     // ②\n    int nEndTime;\n    int nCityNum;\npublic:\n    CKingdom(int nCityNum_, int nInitMoney);\n    void Run(int T);\n    int  TimePass(int nMinutes);         // ③\n    void OutputResult();\n    void AddEvent(EEventType eType, int nCityNo, int nColor, const string & s);\n    void WarEnd();\n};",
+          "learning_goal": "明确事件对象与战场调度器的职责边界。",
+          "source_section_refs": [
+            "3.2.1",
+            "3.2.4"
+          ],
+          "code_block_refs": [
+            "3.2.1",
+            "3.2.4"
+          ],
+          "prerequisites": []
+        },
+        {
+          "section_id": "v3.A.2",
+          "task_id": "task_v3_impl_event_order",
+          "title": "实现输出与排序规则",
+          "description": "学习目标：保证事件输出格式与优先级排序符合题目时序。\n\n`Output()` 负责把一条事件记录打印出来。函数体内声明一个字符数组 `szTime`，用 `sprintf` 把内部存储的分钟数拆成小时（整除 60）和剩余分钟（取模 60），以 `%03d:%02d` 格式写入该数组——例如第 125 分钟输出为 `002:05`。随后用 `cout` 将时间字符串、空格和描述字符串一并输出并换行。\n\n`operator<` 定义了两条事件比较大小的规则，`sort` 函数依赖它来排序。比较按四级优先级依次进行：首先比较时间，早发生的事件排前面；时间相同则比较城市编号，编号小的（即靠西的城市）排前面；城市也相同则比较事件类型枚举值，值小的排前面——这正是枚举声明顺序的意义所在；最后若前三项均相同，则按阵营颜色排，红方（0）排在蓝方（1）之前。四个条件逐层递进，每层判断只在上层相等时才生效，通过连续的 `if` 短路实现。",
+          "code": "// warcraft3.cpp\n--snip--\nvoid CEvent::Output()\n{\n    char szTime[20];\n    sprintf(szTime, \"%03d:%02d\", nTime / 60, nTime % 60);   // ①\n    cout << szTime << \" \" << sDescribe << endl;\n}\n\n// warcraft3.cpp\n--snip--\nbool CEvent::operator<(const CEvent & e2) const\n{\n    if (nTime != e2.nTime)           return nTime < e2.nTime;           // ①\n    if (nCityNo != e2.nCityNo)       return nCityNo < e2.nCityNo;       // ②\n    if (eEventType != e2.eEventType) return eEventType < e2.eEventType; // ③\n    return nColor < e2.nColor;                                           // ④\n}",
+          "learning_goal": "保证事件输出格式与优先级排序符合题目时序。",
+          "source_section_refs": [
+            "3.2.2",
+            "3.2.3"
+          ],
+          "code_block_refs": [
+            "3.2.2",
+            "3.2.3"
+          ],
+          "prerequisites": [
+            "task_v3_decl_event_kingdom"
+          ]
+        },
+        {
+          "section_id": "v3.A.3",
+          "task_id": "task_v3_impl_kingdom_scheduler",
+          "title": "实现 CKingdom 调度与时间推进",
+          "description": "学习目标：打通 Run、输出汇总和 TimePass 的调度主线。\n\n构造函数负责初始化两个司令部并建立它们之间的连接。初始化列表将 `nTimeInMinutes` 置零，红方司令部以 `COLOR_RED`、初始生命元和城市编号 0 初始化，蓝方司令部以 `COLOR_BLUE`、初始生命元和城市编号 `nCityNum + 1` 初始化——红方在世界最西端，蓝方在最东端，分别向对方方向推进。`nCityNum` 也在初始化列表中赋值。\n\n函数体内让两个司令部相互认识：分别调用 `SetKingdom(this)` 让每个司令部持有指向 `CKingdom` 的指针（用于调用 `AddEvent`），再调用 `SetEnemy()` 让每个司令部持有指向对方的指针（用于查询敌情）。最后把 `nEndTime` 初始化为 `3000000`，作为\"战争尚未结束\"的哨兵值——任何合法的模拟时间都不会超过这个数，`WarEnd()` 调用时才会被替换为真实的结束时刻。\n\n这四个方法各司其职，共同构成模拟的外层框架。\n\n`Run(T)` 从第 0 分钟逐分钟推进到第 T 分钟，每分钟调用一次 `TimePass(t)`；只要 `TimePass` 返回 0（表示战争已结束），就立即停止循环，不再继续推进时间。\n\n`OutputResult()` 利用 `operator<` 对 `vEvent` 向量排序后，逐条调用 `Output()` 打印每条事件。所有事件在这一刻才真正打印——**先收集，后排序，再输出**，这就是事件驱动架构的核心价值。\n\n`AddEvent()` 是一个转发函数：它把调用方提供的事件类型、城市、阵营和描述字符串，连同当前时间 `nTimeInMinutes`，一起打包成 `CEvent` 对象，追加到 `vEvent` 末尾。程序中所有模块都通过这个统一入口添加事件，而不是直接操作 `vEvent`。\n\n`WarEnd()` 只记录**第一次**战争结束的时间：判断 `nEndTime` 是否仍为哨兵值 `3000000`，若是则将其更新为当前时间 `nTimeInMinutes`，否则不做任何操作——这保证了多次调用只有第一次生效。\n\n`TimePass()` 是整个时间轴的调度中心。函数接受当前分钟数，先将其存入成员变量 `nTimeInMinutes`，然后检查是否已超过战争结束时刻 `nEndTime`——若超过则直接返回 0，通知 `Run()` 停止循环。\n\n随后用当前分钟数对 60 取模得到本小时内的余数，通过 `switch` 将七个时间点映射到对应的动作：整点（余数 0）触发红蓝双方各造一名武士；第 5 分钟触发 lion 逃跑检查；第 10 分钟触发所有武士行军一步；第 35 分钟触发 wolf 抢夺武器；第 40 分钟触发战斗；第 50 分钟触发司令部报告剩余生命元；第 55 分钟触发武士报告武器情况。题目的所有逻辑都汇聚在这张时间表里，新增规则只需在对应分钟增加调用即可。最后返回 1，表示时间推进正常。",
+          "code": "// warcraft3.cpp\n--snip--\nCKingdom::CKingdom(int nCityNum_, int nInitMoney) :\n    nTimeInMinutes(0),\n    Red(COLOR_RED,  nInitMoney, 0),\n    Blue(COLOR_BLUE, nInitMoney, nCityNum_ + 1),   // ①\n    nCityNum(nCityNum_)\n{\n    Red.SetKingdom(this);   Red.SetEnemy(&Blue);\n    Blue.SetKingdom(this);  Blue.SetEnemy(&Red);   // ②\n    nEndTime = 3000000;\n}\n\n// warcraft3.cpp\n--snip--\nvoid CKingdom::Run(int T) {\n    for (int t = 0; t <= T; t++)\n        if (TimePass(t) == 0) return;   // ①\n}\n\nvoid CKingdom::OutputResult() {\n    sort(vEvent.begin(), vEvent.end());   // ②\n    for (int i = 0; i < vEvent.size(); i++)\n        vEvent[i].Output();\n}\n\nvoid CKingdom::AddEvent(EEventType eType, int nCityNo,\n                        int nColor, const string & s) {\n    CEvent tmp(eType, nTimeInMinutes, nCityNo, nColor, s);\n    vEvent.push_back(tmp);   // ③\n}\n\nvoid CKingdom::WarEnd() {\n    if (nEndTime == 3000000) nEndTime = nTimeInMinutes;   // ④\n}\n\n// warcraft3.cpp\n--snip--\nint CKingdom::TimePass(int nMinutes) {\n    nTimeInMinutes = nMinutes;\n    if (nTimeInMinutes > nEndTime) return 0;   // ①\n    int nRemain = nTimeInMinutes % 60;\n    switch (nRemain) {\n        case  0: Red.WarriorBorn();    Blue.WarriorBorn();    break;  // ②\n        case  5: Red.LionRunaway();    Blue.LionRunaway();    break;\n        case 10: Red.WarriorsMarch(nCityNum + 1);\n                 Blue.WarriorsMarch(0);                       break;\n        case 35: Red.WolfsRob();       Blue.WolfsRob();       break;\n        case 40: Red.WarriorsAttack(); Blue.WarriorsAttack(); break;\n        case 50: Red.PrintMoney();     Blue.PrintMoney();     break;\n        case 55: Red.WarriorsReport(); Blue.WarriorsReport(); break;\n    }\n    return 1;\n}",
+          "learning_goal": "打通 Run、输出汇总和 TimePass 的调度主线。",
+          "source_section_refs": [
+            "3.2.5",
+            "3.2.6",
+            "3.2.7"
+          ],
+          "code_block_refs": [
+            "3.2.5",
+            "3.2.6",
+            "3.2.7"
+          ],
+          "prerequisites": [
+            "task_v3_impl_event_order"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v3.B",
+      "h2_title": "补武器继承体系",
+      "sections": [
+        {
+          "section_id": "v3.B.1",
+          "task_id": "task_v3_decl_weapon_tree",
+          "title": "声明 CWeapon 及三种武器子类",
+          "description": "学习目标：建立统一武器接口和子类扩展点。\n\n上一章的 `CWeapon` 只是一个数据容器。这一章三种武器的攻击逻辑各不相同，因此 `CWeapon` 升级为含有纯虚函数的基类。先来写好它的声明。\n\n公开成员包含：整型 `nKindNo` 记录武器种类编号；指针 `master` 指向持有该武器的武士——因为攻击力是拥有者当前攻击力的百分比，计算时需要回查 `master`；静态字符串数组 `Names` 存放三种武器的名称。\n\n构造函数接受武士指针并赋给 `master`，使用初始化列表完成，函数体为空。`GetForce()` 声明为纯虚函数（`= 0`），强制三个子类各自给出计算攻击力的公式。`Attack()` 声明为普通虚函数并提供默认实现，子类可按需覆盖；其返回值有三种含义：0 表示武器已消耗完毕（调用方应立即 `delete`），1 表示状态未改变，2 表示武器被使用但状态发生了改变。`NewWeapon()` 是一个静态工厂方法，接受编号和武士指针，返回对应子类的指针，调用方无需关心具体类型。\n\n`CSWord` 继承自 `CWeapon`，是最简单的武器子类。`GetForce()` 返回拥有者当前攻击力的 20%，写成整数乘法 `master->GetForce() * 2 / 10` 以避免浮点误差。构造函数调用基类构造函数并将 `nKindNo` 置为 0。`CSWord` 没有覆盖 `Attack()`，沿用基类版本——剑没有额外状态，每次攻击后仍可继续使用，不会被消耗。\n\n`CArrow` 继承自 `CWeapon`，增加了一个私有整型成员 `usedTimes` 记录已使用次数。`GetForce()` 返回拥有者攻击力的 30%，同样写成整数乘法 `* 3 / 10`。构造函数在初始化列表中调用基类构造函数并将 `usedTimes` 置零，函数体内将 `nKindNo` 置为 2。\n\n`CArrow` 覆盖了 `Attack()`：先调用 `CWeapon::Attack()` 完成基类的伤害逻辑，再将 `usedTimes` 加一；当 `usedTimes` 达到 2 时返回 0，通知调用方立即删除这支箭；否则返回 2，表示武器状态已改变但尚未消耗。\n\n`CBomb` 继承自 `CWeapon`，是最特殊的武器——爆炸时使用者本身也会受到伤害。`GetForce()` 返回拥有者攻击力的 40%，写成整数乘法 `* 4 / 10`。构造函数在初始化列表中调用基类构造函数，函数体内将 `nKindNo` 置为 1。\n\n`CBomb` 覆盖了 `Attack()`：先调用 `GetForce()` 计算攻击力存入局部变量 `force`；然后检查 `master` 的名字是否包含 `\"ninja\"`——ninja 天生免疫炸弹自伤，若不是 ninja 则调用 `master->Hurted(force / 2)` 让使用者受到攻击力一半的伤害；随后调用 `pEnemy->Hurted(force)` 对敌人造成满额伤害；最后返回 0，表示炸弹一次性消耗，调用方应立即删除。\n\n> **注意：** 题目明确要求\"去尾取整\"的除法不要用浮点数（`force * 0.3` 在不同编译器下可能得到 `14` 或 `15`），必须写整数乘法再整除：`force * 3 / 10`。",
+          "code": "// warcraft3.cpp\n--snip--\nclass CWeapon\n{\npublic:\n    int nKindNo;\n    CWarrior * master;                              // ①\n    static const char * Names[WEAPON_NUM];\n\n    CWeapon(CWarrior * m) : master(m) {}\n    virtual int GetForce() = 0;                     // ②\n    virtual int Attack(CWarrior * pEnemy);          // ③\n    static CWeapon * NewWeapon(int idx, CWarrior * master);  // ④\n};\n\n// warcraft3.cpp\n--snip--\nclass CSWord : public CWeapon\n{\npublic:\n    virtual int GetForce() {\n        return master->GetForce() * 2 / 10;   // ①\n    }\n    CSWord(CWarrior * m) : CWeapon(m) { nKindNo = 0; }\n};\n\n// warcraft3.cpp\n--snip--\nclass CArrow : public CWeapon\n{\n    int usedTimes;\npublic:\n    virtual int GetForce() {\n        return master->GetForce() * 3 / 10;   // ①\n    }\n    CArrow(CWarrior * master) : CWeapon(master), usedTimes(0) { nKindNo = 2; }\n    virtual int Attack(CWarrior * pEnemy) {\n        CWeapon::Attack(pEnemy);\n        ++usedTimes;\n        if (usedTimes == 2) return 0;   // ②\n        return 2;\n    }\n};\n\n// warcraft3.cpp\n--snip--\nclass CBomb : public CWeapon\n{\npublic:\n    virtual int GetForce() {\n        return master->GetForce() * 4 / 10;   // ①\n    }\n    CBomb(CWarrior * master) : CWeapon(master) { nKindNo = 1; }\n    virtual int Attack(CWarrior * pEnemy) {\n        int force = GetForce();\n        if (master->GetName().find(\"ninja\") == string::npos)\n            master->Hurted(force / 2);   // ②\n        pEnemy->Hurted(force);\n        return 0;   // ③\n    }\n};",
+          "learning_goal": "建立统一武器接口和子类扩展点。",
+          "source_section_refs": [
+            "3.3.1",
+            "3.3.3",
+            "3.3.4",
+            "3.3.5"
+          ],
+          "code_block_refs": [
+            "3.3.1",
+            "3.3.3",
+            "3.3.4",
+            "3.3.5"
+          ],
+          "prerequisites": [
+            "task_v3_decl_event_kingdom"
+          ]
+        },
+        {
+          "section_id": "v3.B.2",
+          "task_id": "task_v3_impl_weapon_behavior",
+          "title": "实现默认攻击与武器工厂",
+          "description": "学习目标：让武器行为可被统一调用，并通过工厂按编号构造。\n\n基类的 `Attack()` 给出所有武器共用的默认攻击逻辑：调用 `GetForce()` 计算本次攻击力，再调用 `pEnemy->Hurted()` 对敌人造成伤害，最后返回 1 表示武器状态未改变。三个子类会按需覆盖这一行为——`CArrow` 覆盖以计数使用次数，`CBomb` 覆盖以追加自伤逻辑。\n\n`NewWeapon()` 是 `CWeapon` 的静态方法，接受武器种类编号 `idx` 和武士指针 `master`，用 `switch` 按编号分三个分支，分别用 `new` 创建 `CSWord`、`CBomb`、`CArrow` 对象并返回其指针；若编号不在 0、1、2 范围内则返回 `NULL`。武士子类的构造函数只需调用 `CWeapon::NewWeapon(nId % 3, this)` 就能得到正确类型的武器对象，不必关心是剑、炸弹还是箭。",
+          "code": "// warcraft3.cpp\n--snip--\nint CWeapon::Attack(CWarrior * pEnemy) {\n    pEnemy->Hurted(GetForce());\n    return 1;   // ①\n}\n\n// warcraft3.cpp\n--snip--\nCWeapon * CWeapon::NewWeapon(int idx, CWarrior * master)\n{\n    switch (idx) {\n        case 0: return new CSWord(master);\n        case 1: return new CBomb(master);\n        case 2: return new CArrow(master);\n    }\n    return NULL;\n}",
+          "learning_goal": "让武器行为可被统一调用，并通过工厂按编号构造。",
+          "source_section_refs": [
+            "3.3.2",
+            "3.3.6"
+          ],
+          "code_block_refs": [
+            "3.3.2",
+            "3.3.6"
+          ],
+          "prerequisites": [
+            "task_v3_decl_weapon_tree"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v3.C",
+      "h2_title": "实现武士战斗行为",
+      "sections": [
+        {
+          "section_id": "v3.C.1",
+          "task_id": "task_v3_warrior_fields_lifecycle",
+          "title": "扩展 CWarrior 字段与生命周期",
+          "description": "学习目标：补齐移动战斗所需状态并处理资源释放。\n\n`CWarrior` 在本章新增了位置、攻击力、武器数组等字段，并声明了 `Runaway()`、`Yell()` 等可供子类覆盖的虚函数。先来写好类的声明。\n\n类的最顶部用 `static const int MAX_WPS = 10` 定义武器数组的最大容量。`protected` 区域新增了四个成员：`nCityNo` 记录武士当前所在城市编号，红方从 0 出发向右走，蓝方从 `N+1` 出发向左走；`nForce` 记录武士的攻击力；`weaponIdx` 是武器循环使用的游标，每次 `FightBack` 时从这里找到下一件可用武器；`weapons[MAX_WPS]` 是最多持有 10 件武器的指针数组，不用的槽位保持 `NULL`。原有的 `nStrength`、`nId`、`pHeadquarter` 成员继续保留。\n\n`public` 区域除原有的静态名称和生命值数组外，新增了 `InitialForce` 静态数组存放各武士种类的初始攻击力。虚函数 `Runaway()` 默认返回 `false`，`Yell()` 默认返回空字符串，只有 lion 和 dragon 需要覆盖，其余子类无需理会。此外声明了构造函数、虚析构函数、纯虚函数 `GetName()`，以及 `March()`、`SortWeapons()`、`Attack()`、`FightBack()`、`TakeEnemyWeapons()` 五个战场方法。\n\n构造函数接受武士编号、生命值、攻击力、城市编号和司令部指针五个参数，通过初始化列表将它们依次赋给对应成员，同时把 `weaponIdx` 初始化为 0。函数体内用 `memset` 把武器数组的所有字节置零，即把全部 10 个指针槽位初始化为 `NULL`——武器是按需通过 `NewWeapon()` 创建后挂入数组的，必须确保空槽位不残留随机值，否则后续判断 `weapons[i]` 是否为空时会读到野指针。\n\n析构函数遍历武器数组，对每个非空指针调用 `delete` 释放动态分配的武器对象。规则和上一章一样：`new` 出来的东西最终必须 `delete`，析构函数在武士对象生命期结束时自动被调用。",
+          "code": "// warcraft3.cpp\n--snip--\nclass CWarrior\n{\npublic:\n    static const int MAX_WPS = 10;\nprotected:\n    int nStrength;\n    int nForce;\n    int nCityNo;       // ①\n    int nId;\n    int weaponIdx;     // ②\n    CHeadquarter * pHeadquarter;\n    CWeapon * weapons[MAX_WPS];   // ③\npublic:\n    static const char * Names[WARRIOR_NUM];\n    static int InitialLifeValue[WARRIOR_NUM];\n    static int InitalForce[WARRIOR_NUM];\n\n    virtual bool Runaway() { return false; }   // ④\n    virtual string Yell()  { return \"\"; }\n\n    CWarrior(int nId_, int nStrength_, int nForce_, int nCityNo_,\n             CHeadquarter * pHeadquarter_);\n    virtual ~CWarrior();\n    virtual string GetName() = 0;\n    virtual void March();\n    void SortWeapons(bool forTaken = false);\n    int  Attack(CWarrior * pEnemy);\n    void FightBack(CWarrior * pEnemy);\n    string TakeEnemyWeapons(CWarrior * pEnemy, bool beforeFight = false);\n};\n\n// warcraft3.cpp\n--snip--\nCWarrior::CWarrior(int nId_, int nStrength_, int nForce_, int nCityNo_,\n                   CHeadquarter * pHeadquarter_) :\n    nId(nId_), nStrength(nStrength_), nForce(nForce_),\n    nCityNo(nCityNo_), pHeadquarter(pHeadquarter_), weaponIdx(0)\n{\n    memset(weapons, 0, sizeof(weapons));   // ①\n}\n\nCWarrior::~CWarrior() {\n    for (int i = 0; i < MAX_WPS; ++i)\n        if (weapons[i]) delete weapons[i];   // ②\n}",
+          "learning_goal": "补齐移动战斗所需状态并处理资源释放。",
+          "source_section_refs": [
+            "3.4.1",
+            "3.4.2"
+          ],
+          "code_block_refs": [
+            "3.4.1",
+            "3.4.2"
+          ],
+          "prerequisites": [
+            "task_v3_impl_weapon_behavior"
+          ]
+        },
+        {
+          "section_id": "v3.C.2",
+          "task_id": "task_v3_warrior_combat_pipeline",
+          "title": "实现行军、攻击、反击与缴获流程",
+          "description": "学习目标：形成完整单兵作战流程并处理武器排序与缴获边界。\n\n`March()` 在每小时第 10 分钟被调用，武士向对方方向前进一步。函数根据武士颜色决定移动方向：红方城市编号加一（向东），蓝方城市编号减一（向西）。移动完毕后将 `weaponIdx` 归零，使武器轮次从头开始——题目规定战斗开始前先重新排好武器顺序再使用，归零保证了每场战斗的武器使用从第一件开始循环。\n\n武器在战斗前和被缴获时需要按不同规则排序，由全局比较函数 `WpCompare` 和武士方法 `SortWeapons()` 共同实现。\n\n`WpCompare` 是传递给 `qsort` 的比较函数，参数类型固定为 `const void *`，函数体内先转型为 `CWeapon**`。排序规则分四层：若其中一个指针为 `NULL`，则 `NULL` 排到末尾——这样所有非空武器都集中到数组前段，方便遍历；非空时先按武器种类编号排，sword(0) < bomb(1) < arrow(2)；若两件武器均为 arrow，则把**用过次数少的排前面**，即新箭优先使用；其余情况视为相等。\n\n`SortWeapons()` 接受一个布尔参数 `forTaken`。`forTaken = false`（默认）时使用 `WpCompare`，`forTaken = true` 时使用 `WpCompare2`——`WpCompare2` 与 `WpCompare` 的区别在于 arrow 的排序方向相反：缴获敌方武器时，优先缴获**没用过的箭**（用过 0 次的先缴）。\n\n`Attack()` 是攻击方的主动出击方法。函数首先检查双方生命值，若任一方已死亡则直接返回 0。\n\n核心是一个 `while(true)` 外层循环，内层用 `for` 遍历 `weapons` 数组的全部 10 个槽位。对每个非空武器槽，先记录敌人当前生命值 `tmps`，再调用该武器的 `Attack()` 方法对敌人造成伤害。若武器返回 0（表示已消耗），立即 `delete` 并将指针置 `NULL`。每用完一件武器后立即检查双方生命值，若有一方死亡则返回 0；否则调用 `pEnemy->FightBack(this)` 让敌方用当前轮次的一件武器还击，还击后再次检查生命值。若敌人生命值发生了变化或武器被消耗，则标记 `validAttack = true`。\n\n内层 `for` 完成一轮全部武器的扫描后，检查 `validAttack`：若本轮没有任何武器产生任何变化（双方均无伤害），说明陷入平局僵局，跳出外层循环结束战斗。\n\n`FightBack()` 在每次攻击方用完一件武器后被调用，还击方只用当前轮次的一件武器。\n\n函数首先检查 `weaponIdx == MAX_WPS`，这是武器全部耗尽的特殊标记，若为真则直接返回，不再还击。随后从 `weaponIdx` 位置开始向后找第一个非空武器槽，找到后调用该武器的 `Attack()` 方法对敌方造成伤害，若返回 0 则立即 `delete` 并置空。找到并使用武器后，将 `weaponIdx` 推进到下一格（对 `MAX_WPS` 取模循环），下次还击从这里继续——这实现了\"双方交替使用武器\"的规则。若从 `weaponIdx` 到末尾没有找到任何可用武器，则从头再找一遍；若仍无武器，则将 `weaponIdx` 置为 `MAX_WPS` 标记彻底用尽。\n\n`TakeEnemyWeapons()` 处理两种场景：`beforeFight = true` 时 wolf 在战前抢武器，`beforeFight = false` 时战后胜方缴获。\n\n函数开头先调用 `SortWeapons()` 整理自己的武器，再遍历自己的数组找到第一个空槽位置 `i`。若 `i == MAX_WPS` 说明自己已满，直接返回空字符串放弃缴获。\n\n`beforeFight = true` 的 wolf 分支：初始化目标种类编号 `nKindNo = -1` 和抢夺计数 `wolfget = 0`，遍历敌人的武器数组；对第一件有效武器记录其种类编号，此后只抢与之**相同种类**的武器（遇到不同种类立即停止）；每抢一件就把指针移入自己的空槽，同时将武器的 `master` 指针改指向自己（否则 `GetForce()` 仍按原主人的攻击力计算），将敌人对应槽位置 `NULL`，`wolfget` 加一。抢夺结束后若 `wolfget > 0`，格式化描述字符串（如 `\"3 bomb\"`）存入返回值。\n\n战斗结束后胜方统一缴获时进入 `else` 分支：先以 `forTaken = true` 调用 `pEnemy->SortWeapons()`，使用 `WpCompare2` 规则排序敌人武器（优先缴获没用过的箭）；随后遍历敌人武器数组，将所有非空武器逐一移入自己的空槽，同时修改 `master` 指针并将敌人对应槽位置 `NULL`，直到自己满了（`i == MAX_WPS`）为止。缴获完毕后调用自己的 `SortWeapons()` 整理武器顺序，使后续战斗时武器按正确顺序使用。最后返回 `retVal`，战后分支中该字符串为空，调用方不会产生输出。",
+          "code": "// warcraft3.cpp\n--snip--\nvoid CWarrior::March()\n{\n    if (GetColor() == COLOR_RED) nCityNo++;   // ①\n    else                          nCityNo--;\n    weaponIdx = 0;   // ②\n}\n\n// warcraft3.cpp\n--snip--\nint WpCompare(const void *wp1, const void *wp2)   // ①\n{\n    CWeapon **p1 = (CWeapon **)wp1;\n    CWeapon **p2 = (CWeapon **)wp2;\n    if (*p1 == NULL) return  1;   // ②\n    if (*p2 == NULL) return -1;\n    if ((*p1)->nKindNo != (*p2)->nKindNo)\n        return (*p1)->nKindNo - (*p2)->nKindNo;   // ③\n    if ((*p1)->nKindNo == WEAPON_ARROW)\n        return ((CArrow *)(*p2))->usedTimes\n             - ((CArrow *)(*p1))->usedTimes;      // ④\n    return 0;\n}\n\nvoid CWarrior::SortWeapons(bool forTaken)\n{\n    if (forTaken)\n        qsort(weapons, MAX_WPS, sizeof(CWeapon *), WpCompare2);   // ⑤\n    else\n        qsort(weapons, MAX_WPS, sizeof(CWeapon *), WpCompare);\n}\n\n// warcraft3.cpp\n--snip--\nint CWarrior::Attack(CWarrior * pEnemy)\n{\n    if (nStrength <= 0 || pEnemy->GetStrength() <= 0)\n        return 0;\n    while (true) {\n        bool validAttack = false;\n        for (int i = 0; i < MAX_WPS; ++i) {\n            int tmps = pEnemy->GetStrength();   // ①\n            if (weapons[i]) {\n                int tmp = weapons[i]->Attack(pEnemy);\n                if (tmp == 0) {                 // ②\n                    delete weapons[i];\n                    weapons[i] = NULL;\n                    validAttack = true;\n                }\n                if (nStrength <= 0 || pEnemy->GetStrength() <= 0)\n                    return 0;\n                pEnemy->FightBack(this);        // ③\n                if (nStrength <= 0 || pEnemy->GetStrength() <= 0)\n                    return 0;\n                if (tmps != pEnemy->GetStrength() || tmp != 1)\n                    validAttack = true;         // ④\n            }\n        }\n        if (!validAttack) break;               // ⑤\n    }\n    return 0;\n}\n\n// warcraft3.cpp\n--snip--\nvoid CWarrior::FightBack(CWarrior * pEnemy)\n{\n    if (weaponIdx == MAX_WPS) return;   // ①\n    bool done = false;\n    int i = weaponIdx;\n    for (; i < MAX_WPS; ++i) {\n        if (weapons[i]) {\n            done = true;\n            int tmp = weapons[i]->Attack(pEnemy);\n            if (tmp == 0) { delete weapons[i]; weapons[i] = NULL; }\n            break;\n        }\n    }\n    if (done)\n        weaponIdx = (i + 1) % MAX_WPS;   // ②\n    else {\n        weaponIdx = 0;\n        // 从头再找一遍，若仍无武器则 weaponIdx = MAX_WPS 标记用尽\n        ...\n    }\n}\n\n// warcraft3.cpp\n--snip--\nstring CWarrior::TakeEnemyWeapons(CWarrior * pEnemy, bool beforeFight)\n{\n    SortWeapons();\n    int i;\n    for (i = 0; i < MAX_WPS; ++i)\n        if (weapons[i] == NULL) break;   // ①\n    if (i == MAX_WPS) return \"\";          // ②\n\n    string retVal = \"\";\n    if (beforeFight) {   // ③  wolf 抢武器\n        int nKindNo = -1;\n        int wolfget = 0;\n        for (int k = 0; i < MAX_WPS && k < MAX_WPS; ++k) {\n            if (pEnemy->weapons[k]) {\n                if (nKindNo == -1 ||\n                    pEnemy->weapons[k]->nKindNo == nKindNo) {\n                    nKindNo = pEnemy->weapons[k]->nKindNo;\n                    weapons[i++] = pEnemy->weapons[k];\n                    pEnemy->weapons[k]->master = this;   // ④\n                    pEnemy->weapons[k] = NULL;\n                    ++wolfget;\n                } else break;\n            }\n        }\n        if (wolfget > 0) {\n            char tmp[100];\n            sprintf(tmp, \"%d %s\", wolfget, CWeapon::Names[nKindNo]);\n            retVal = tmp;\n        }\n    }\n    --snip--\n\n// warcraft3.cpp（接上）\n    --snip--\n    } else {   // ①  战斗结束后缴获\n        pEnemy->SortWeapons(true);\n        for (int k = 0; i < MAX_WPS && k < MAX_WPS; ++k) {\n            if (pEnemy->weapons[k]) {\n                weapons[i++] = pEnemy->weapons[k];\n                pEnemy->weapons[k]->master = this;\n                pEnemy->weapons[k] = NULL;\n            }\n        }\n    }\n    SortWeapons();\n    return retVal;\n}",
+          "learning_goal": "形成完整单兵作战流程并处理武器排序与缴获边界。",
+          "source_section_refs": [
+            "3.4.3",
+            "3.4.4",
+            "3.4.5",
+            "3.4.6",
+            "3.4.7",
+            "3.4.8"
+          ],
+          "code_block_refs": [
+            "3.4.3",
+            "3.4.4",
+            "3.4.5",
+            "3.4.6",
+            "3.4.7",
+            "3.4.8"
+          ],
+          "prerequisites": [
+            "task_v3_warrior_fields_lifecycle"
+          ]
+        },
+        {
+          "section_id": "v3.C.3",
+          "task_id": "task_v3_subclass_specials",
+          "title": "实现龙狮冰子类特殊规则",
+          "description": "学习目标：将子类特性准确接入通用战斗流程。\n\n`CLion` 继承自 `CWarrior`，增加了私有成员 `nLoyalty`（忠诚度）和静态成员 `nLoyaltyDec`（每步忠诚度减少量，对应输入参数 K）。\n\n构造函数在初始化列表调用基类构造函数，函数体内将 `nLoyalty` 初始化为降生时司令部的剩余生命元 `pHeadquarter->nMoney`（已在 `Produce()` 扣减过造它的费用之后），并调用 `CWeapon::NewWeapon(nId_ % 3, this)` 给自己装备一件由编号决定种类的初始武器，存入 `weapons[0]`。\n\n`Runaway()` 覆盖基类版本，只需判断 `nLoyalty <= 0`，返回 `true` 时 `LionRunaway()` 会把这头 lion 从列表中删除。\n\n`March()` 先调用 `CWarrior::March()` 完成基类的移动和 `weaponIdx` 归零，再将 `nLoyalty` 减去 `CLion::nLoyaltyDec`，实现每步损失 K 点忠诚度的机制。\n\n`CIceman` 只覆盖 `March()`，其余行为与基类相同。`March()` 先调用 `CWarrior::March()` 完成基类移动，再计算本次损耗量 `dec = nStrength / 10`（当前生命值整除 10，去尾取整），随后从 `nStrength` 中减去 `dec`。注意必须先算出 `dec` 再减，而不是直接写 `nStrength -= nStrength / 10`——两者在语义上等价，但前者更清晰，且避免了某些编译器对复合表达式求值顺序的歧义。\n\n`CDragon` 覆盖 `Yell()`，在战斗后若仍存活就发出欢呼。函数检查 `nStrength > 0`：若 dragon 在这场战斗中没有死亡，返回形如 `\"red dragon 1 yelled in city 3\"` 的欢呼字符串；若已死亡（生命值 ≤ 0），则返回空字符串。`WarriorsAttack()` 在战斗结束后调用每个武士的 `Yell()`，只有返回非空字符串时才调用 `AddEvent()` 追加欢呼事件。",
+          "code": "// warcraft3.cpp\n--snip--\nclass CLion : public CWarrior\n{\n    int nLoyalty;\npublic:\n    static int nLoyaltyDec;\n    CLion(int nId_, int nStrength_, int nForce_,\n          int nCityNo_, CHeadquarter * pHeadquarter_) :\n        CWarrior(nId_, nStrength_, nForce_, nCityNo_, pHeadquarter_)\n    {\n        nLoyalty = pHeadquarter->nMoney;   // ①\n        weapons[0] = CWeapon::NewWeapon(nId_ % 3, this);\n    }\n    virtual bool Runaway() { return nLoyalty <= 0; }   // ②\n    virtual void March() {\n        CWarrior::March();\n        nLoyalty -= CLion::nLoyaltyDec;   // ③\n    }\n};\n\n// warcraft3.cpp\n--snip--\nvoid CIceman::March()\n{\n    CWarrior::March();\n    int dec = nStrength / 10;   // ①\n    nStrength -= dec;\n}\n\n// warcraft3.cpp\n--snip--\nvirtual string Yell() {\n    if (nStrength > 0)   // ①\n        return GetName() + \" yelled in city \" + MyIntToStr(nCityNo);\n    else\n        return \"\";\n}",
+          "learning_goal": "将子类特性准确接入通用战斗流程。",
+          "source_section_refs": [
+            "3.5.1",
+            "3.5.2",
+            "3.5.3"
+          ],
+          "code_block_refs": [
+            "3.5.1",
+            "3.5.2",
+            "3.5.3"
+          ],
+          "prerequisites": [
+            "task_v3_warrior_combat_pipeline"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v3.D",
+      "h2_title": "落地司令部战场管理",
+      "sections": [
+        {
+          "section_id": "v3.D.1",
+          "task_id": "task_v3_hq_container_ops",
+          "title": "实现司令部容器与行军抢夺阶段",
+          "description": "学习目标：管理武士集合并稳定执行逃跑、行军、抢夺等阶段。\n\n本章的 `CHeadquarter` 把武士容器从上一章的指针数组改为 `list<CWarrior*>`，同时增加了大量战场管理方法。声明 `friend class CWarrior`，允许武士访问司令部的私有成员 `nMoney`。\n\n私有成员包括：剩余生命元 `nMoney`、已造武士总数 `nWarriorNo`、武士链表 `lstWarrior`、阵营颜色 `nColor`、指向所属 `CKingdom` 的指针 `pKingdom`、本方司令部城市编号 `nCityNo`，以及指向敌方司令部的指针 `pEnemyheadquarter`。公开部分保留上一章的 `MakingSeq` 静态数组，并声明新增的各战场方法。\n\n使用 `list` 而非数组的核心原因是：`list` 允许在遍历过程中**安全地删除当前元素**——`lstWarrior.erase(i)` 返回下一个有效迭代器，不会导致后续迭代器失效。lion 逃跑时从列表中删除，武士死亡后的清理都依赖这一特性；如果用数组，删除中间元素时需要移动后续元素，遍历时删除会出错。\n\n每小时第 5 分，`LionRunaway()` 检查并清除忠诚度不足的 lion。函数用 `list` 迭代器遍历 `lstWarrior`，对每个武士调用 `Runaway()`——非 lion 子类返回 `false` 直接跳过，lion 子类若忠诚度 ≤ 0 则返回 `true`。\n\n对于 `Runaway()` 返回 `true` 的 lion，先检查其当前位置：若红方 lion 已到达蓝方司令部城市，或蓝方 lion 已到达红方司令部城市，说明它已完成任务，不会逃跑，迭代器前进一格继续。否则格式化\"X ran away\"事件描述，调用 `AddEvent` 记录 `EVENT_LION_RUN` 事件，再调用 `lstWarrior.erase(i)` 删除该 lion——`erase` 返回下一个有效迭代器直接赋给 `i`，循环继续而不会跳过或重复处理元素。\n\n每小时第 10 分，`WarriorsMarch()` 让所有武士向敌方方向前进一步。函数接受敌方司令部城市编号 `nEnemyHeadquterCityNo`，遍历 `lstWarrior` 中的每个武士。\n\n对每个武士，先记录移动前的位置 `nOldPos`，再根据阵营颜色判断是否需要移动：红方武士若尚未到达敌方司令部则调用 `March()` 前进，蓝方同理。移动后格式化包含当前生命值和攻击力的后缀字符串。\n\n若武士原来不在敌方司令部位置（`nOldPos != nEnemyHeadquterCityNo`），则根据移动后的位置决定输出内容：若恰好抵达敌方司令部城市，输出\"reached ... headquarter\"事件并调用 `pEnemyheadquarter->EnemyReach()` 通知对方被占领、触发 `CKingdom::WarEnd()` 记录战争结束时刻；否则输出普通的\"marched to city N\"行军事件。\n\n每小时第 35 分，`WolfsRob()` 让所有 wolf 提前抢夺同城敌人的武器。函数遍历 `lstWarrior`，对每个武士先跳过已死亡者（生命值 ≤ 0），再检查名字是否包含 `\"wolf\"`——只有 wolf 会抢武器，其他武士直接跳过。\n\n对于存活的 wolf，查询敌方司令部在同一城市是否有武士 `p`；若有且对方也是 wolf 则跳过（wolf 不抢 wolf）；否则以 `beforeFight = true` 调用 `(*i)->TakeEnemyWeapons(p, true)` 执行抢夺，返回值为描述字符串（如 `\"3 bomb\"`）。若返回非空字符串，则格式化完整的抢夺事件描述并调用 `AddEvent` 记录 `EVENT_WOLFSROB` 事件。",
+          "code": "// warcraft3.cpp\n--snip--\nclass CHeadquarter {\n    friend class CWarrior;\nprivate:\n    int nMoney;\n    int nWarriorNo;\n    list<CWarrior*> lstWarrior;   // ①\n    int nColor;\n    CKingdom * pKingdom;\n    int nCityNo;\n    CHeadquarter * pEnemyheadquarter;\npublic:\n    static int MakingSeq[2][WARRIOR_NUM];\n    --snip--\n};\n\n// warcraft3.cpp\n--snip--\nvoid CHeadquarter::LionRunaway()\n{\n    list<CWarrior*>::iterator i = lstWarrior.begin();\n    while (i != lstWarrior.end()) {\n        if ((*i)->Runaway()) {\n            int nCityNo = (*i)->GetPosition();\n            if (nColor == COLOR_RED && nCityNo == pKingdom->nCityNum + 1 ||\n                nColor == COLOR_BLUE && nCityNo == 0)   // ①\n            { i++; continue; }\n            string s = (*i)->GetName() + \" ran away\";\n            AddEvent(EVENT_LION_RUN, (*i)->nCityNo, nColor, s);\n            i = lstWarrior.erase(i);   // ②\n            continue;\n        }\n        i++;\n    }\n}\n\n// warcraft3.cpp\n--snip--\nvoid CHeadquarter::WarriorsMarch(int nEnemyHeadquterCityNo)\n{\n    list<CWarrior*>::iterator i;\n    for (i = lstWarrior.begin(); i != lstWarrior.end(); i++) {\n        int nOldPos = (*i)->nCityNo;\n        if (nColor == COLOR_RED) {\n            if ((*i)->nCityNo < nEnemyHeadquterCityNo) (*i)->March();\n        } else {\n            if ((*i)->nCityNo > nEnemyHeadquterCityNo) (*i)->March();\n        }\n        char szTmp[100];\n        sprintf(szTmp, \" with %d elements and force %d\",\n                (*i)->nStrength, (*i)->nForce);\n        if (nOldPos != nEnemyHeadquterCityNo) {\n            if ((*i)->nCityNo == nEnemyHeadquterCityNo) {   // ①\n                string s = (*i)->GetName() + \" reached \" +\n                           pEnemyheadquarter->GetColorStr() +\n                           \" headquarter\" + szTmp;\n                AddEvent(EVENT_REACH, (*i)->nCityNo, nColor, s);\n                pEnemyheadquarter->EnemyReach();              // ②\n            } else {\n                string s = (*i)->GetName() + \" marched to city \" +\n                           MyIntToStr((*i)->GetPosition()) + szTmp;\n                AddEvent(EVENT_MARCH, (*i)->GetPosition(), nColor, s);\n            }\n        }\n    }\n}\n\n// warcraft3.cpp\n--snip--\nvoid CHeadquarter::WolfsRob()\n{\n    list<CWarrior*>::iterator i = lstWarrior.begin();\n    for (; i != lstWarrior.end(); i++) {\n        if ((*i)->nStrength <= 0) continue;\n        if ((*i)->GetName().find(\"wolf\") == string::npos) continue;   // ①\n        int nCityNo = (*i)->GetPosition();\n        CWarrior * p = pEnemyheadquarter->QueryCityWarrior(nCityNo);\n        if (p) {\n            if (p->GetName().find(\"wolf\") != string::npos) continue;  // ②\n            string taken = (*i)->TakeEnemyWeapons(p, true);\n            if (taken != \"\") {\n                char szTmp[200];\n                sprintf(szTmp, \"%s took %s from %s in city %d\",\n                        (*i)->GetName().c_str(), taken.c_str(),\n                        p->GetName().c_str(), nCityNo);\n                AddEvent(EVENT_WOLFSROB, nCityNo, GetColor(), szTmp);\n            }\n        }\n    }\n}",
+          "learning_goal": "管理武士集合并稳定执行逃跑、行军、抢夺等阶段。",
+          "source_section_refs": [
+            "3.6.1",
+            "3.6.2",
+            "3.6.3",
+            "3.6.4"
+          ],
+          "code_block_refs": [
+            "3.6.1",
+            "3.6.2",
+            "3.6.3",
+            "3.6.4"
+          ],
+          "prerequisites": [
+            "task_v3_subclass_specials"
+          ]
+        },
+        {
+          "section_id": "v3.D.2",
+          "task_id": "task_v3_hq_battle_resolve",
+          "title": "实现先后手判定与战斗结算",
+          "description": "学习目标：完成战场交互核心判定，保证各种生死分支一致。\n\n每小时第 40 分是战斗时刻，奇数城市红方先攻，偶数城市蓝方先攻。`WarriorsAttack()` 遍历 `lstWarrior`，对每个存活武士查询敌方同城是否有对手 `p`。\n\n若有对手，根据本方颜色和城市编号奇偶性决定是否应该主动出击：红方只在奇数城市出击，蓝方只在偶数城市出击。这样红蓝各调用一次 `WarriorsAttack()`，每座城市恰好被处理一次，先攻方发起攻击，后攻方紧跟反击，所有战斗细节都封装在 `CWarrior::Attack()` 里。\n\n战斗结束后，检查先攻方 `pAttacker` 的生命值。若先攻方已死亡（`nStrength <= 0`），再检查后攻方 `p`：\n\n若双方同时死亡，输出\"both X and Y died in city N\"——红方名字在前、蓝方名字在后，因此需要根据 `pAttacker` 的颜色决定打印顺序：`pAttacker` 是红方时先打印 `pAttacker` 再打印 `p`，否则相反。\n\n若先攻方死亡而后攻方存活，后攻方杀死先攻方，输出\"X killed Y in city N remaining M elements\"，随后调用 `p->TakeEnemyWeapons(pAttacker)` 缴获先攻方的武器。\n\n若先攻方存活而后攻方死亡，逻辑与上一节对称：先攻方杀死后攻方，输出对应的\"killed\"消息，并调用 `pAttacker->TakeEnemyWeapons(p)` 缴获后攻方武器。\n\n若双方均存活，输出\"both X and Y were alive in city N\"，同样按红方名字在前的规则决定打印顺序。\n\n处理完战斗结果后，调用 `AddEvent` 记录 `EVENT_FIGHT_RESULT` 事件。随后依次检查先攻方和后攻方的 `Yell()` 返回值——dragon 存活时返回欢呼字符串，调用方若得到非空字符串则追加 `EVENT_YELL` 事件。",
+          "code": "// warcraft3.cpp\n--snip--\nvoid CHeadquarter::WarriorsAttack()\n{\n    list<CWarrior*>::iterator j = lstWarrior.begin();\n    for (; j != lstWarrior.end(); j++) {\n        CWarrior * pAttacker = (*j);\n        if (pAttacker->nStrength <= 0) continue;\n        int nCityNo = pAttacker->GetPosition();\n        CWarrior * p = pEnemyheadquarter->QueryCityWarrior(nCityNo);\n        if (p) {\n            bool bShouldAttack = false;\n            if (nColor == COLOR_RED && nCityNo % 2 == 1) bShouldAttack = true;   // ①\n            if (nColor == COLOR_BLUE && nCityNo % 2 == 0) bShouldAttack = true;\n            if (bShouldAttack) {\n                pAttacker->Attack(p);   // ②\n                p->Attack(pAttacker);\n                --snip--\n\n// warcraft3.cpp（接上）\n                --snip--\n                char szTmp[200];\n                if (pAttacker->nStrength <= 0) {\n                    if (p->GetStrength() <= 0) {       // ①\n                        if (pAttacker->GetColor() == COLOR_RED)\n                            sprintf(szTmp, \"both %s and %s died in city %d\",\n                                    pAttacker->GetName().c_str(),\n                                    p->GetName().c_str(), nCityNo);\n                        else\n                            sprintf(szTmp, \"both %s and %s died in city %d\",\n                                    p->GetName().c_str(),\n                                    pAttacker->GetName().c_str(), nCityNo);\n                    } else {   // ②\n                        sprintf(szTmp, \"%s killed %s in city %d remaining %d elements\",\n                                p->GetName().c_str(),\n                                pAttacker->GetName().c_str(),\n                                nCityNo, p->GetStrength());\n                        p->TakeEnemyWeapons(pAttacker);\n                    }\n                }\n                --snip--\n\n// warcraft3.cpp（接上）\n                --snip--\n                } else if (p->GetStrength() <= 0) {   // ①\n                    sprintf(szTmp, \"%s killed %s in city %d remaining %d elements\",\n                            pAttacker->GetName().c_str(),\n                            p->GetName().c_str(),\n                            nCityNo, pAttacker->GetStrength());\n                    pAttacker->TakeEnemyWeapons(p);\n                } else {   // ②\n                    if (pAttacker->GetColor() == COLOR_RED)\n                        sprintf(szTmp, \"both %s and %s were alive in city %d\",\n                                pAttacker->GetName().c_str(),\n                                p->GetName().c_str(), nCityNo);\n                    else\n                        sprintf(szTmp, \"both %s and %s were alive in city %d\",\n                                p->GetName().c_str(),\n                                pAttacker->GetName().c_str(), nCityNo);\n                }\n                AddEvent(EVENT_FIGHT_RESULT, nCityNo, GetColor(), szTmp);\n                string s = pAttacker->Yell();\n                if (s != \"\") AddEvent(EVENT_YELL, nCityNo, pAttacker->GetColor(), s);\n                s = p->Yell();\n                if (s != \"\") AddEvent(EVENT_YELL, nCityNo, p->GetColor(), s);   // ③\n            }\n        }\n    }\n}",
+          "learning_goal": "完成战场交互核心判定，保证各种生死分支一致。",
+          "source_section_refs": [
+            "3.6.5",
+            "3.6.6",
+            "3.6.7"
+          ],
+          "code_block_refs": [
+            "3.6.5",
+            "3.6.6",
+            "3.6.7"
+          ],
+          "prerequisites": [
+            "task_v3_hq_container_ops"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v3.E",
+      "h2_title": "组装主流程",
+      "sections": [
+        {
+          "section_id": "v3.E.1",
+          "task_id": "task_v3_main_assemble",
+          "title": "主函数驱动事件循环",
+          "description": "学习目标：把各模块拼装为可运行的完整事件驱动系统。\n\n主函数读取输入参数，创建 `CKingdom`，运行模拟，输出结果。\n\n外层循环读入测试组数，对每组数据读入四个参数：初始生命元 M、城市数量 N、lion 每步忠诚度减少量 K、模拟截止时间 T（单位为分钟）。K 值直接存入 `CLion::nLoyaltyDec` 静态成员，供所有 lion 对象使用。随后用两个循环读入五种武士的初始生命值和初始攻击力，分别写入 `CWarrior::InitialLifeValue` 和 `CWarrior::InitalForce` 静态数组。\n\n以城市数量 N 和初始生命元 M 为参数构造 `CKingdom MyKingdom(N, M)`，构造函数完成两个司令部的初始化和互相绑定，调用方无需关心细节。随后调用 `MyKingdom.Run(T)` 以分钟为步长推进，战争结束后立即停止。打印\"Case N:\"后调用 `MyKingdom.OutputResult()` 对 `vEvent` 排序后统一输出——所有事件积累到这一刻才真正打印，这就是事件驱动架构的核心价值：**先收集，后排序，再输出**。\n\n如果此时编译并运行程序，对于样例输入\n\n```\n1\n20 1 10 400\n20 20 30 10 20\n5 5 5 5 5\n```\n\n应该得到如下输出：\n\n```\nCase 1:\n000:00 blue lion 1 born\nIts loyalty is 10\n000:10 blue lion 1 marched to city 1 with 10 elements and force 5\n000:50 20 elements in red headquarter\n000:50 10 elements in blue headquarter\n000:55 blue lion 1 has 0 sword 1 bomb 0 arrow and 10 elements\n001:05 blue lion 1 ran away\n001:50 20 elements in red headquarter\n001:50 10 elements in blue headquarter\n...\n```\n\n红方一开始没有足够的生命元造出第一个武士（红方制造顺序首位是 iceman，初始生命值 30，但司令部只有 20），所以全程只有蓝方的 lion 降生、行军、报告后在第二小时因忠诚度降至 0 逃跑。",
+          "code": "// warcraft3.cpp\n--snip--\nint main()\n{\n    int nCases;\n    cin >> nCases;\n    int nCaseNo = 1;\n    while (nCases--) {\n        int M, N, K, T;\n        cin >> M >> N >> K >> T;              // ①\n        CLion::nLoyaltyDec = K;\n        for (int i = 0; i < WARRIOR_NUM; i++)\n            cin >> CWarrior::InitialLifeValue[i];\n        for (int i = 0; i < WARRIOR_NUM; i++)\n            cin >> CWarrior::InitalForce[i];\n        CKingdom MyKingdom(N, M);             // ②\n        MyKingdom.Run(T);                     // ③\n        cout << \"Case \" << nCaseNo++ << \":\" << endl;\n        MyKingdom.OutputResult();             // ④\n    }\n    return 0;\n}",
+          "learning_goal": "把各模块拼装为可运行的完整事件驱动系统。",
+          "source_section_refs": [
+            "3.7"
+          ],
+          "code_block_refs": [
+            "3.7"
+          ],
+          "prerequisites": [
+            "task_v3_hq_battle_resolve",
+            "task_v3_impl_kingdom_scheduler"
+          ]
+        }
+      ]
+    }
+  ],
+  "debug_task_id": "task_debug"
+}

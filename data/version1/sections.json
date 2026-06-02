@@ -1,0 +1,225 @@
+{
+  "planning": {
+    "section_id": "v1.plan",
+    "task_id": "task_v1_plan",
+    "title": "功能设计",
+    "description": "在本章中，我们将解决一道经典的面向对象建模题——魔兽世界备战。题目要求模拟两个司令部按固定顺序循环生产武士，直到生命元耗尽为止，并按时间顺序打印每一个事件。\n这道题本身并不复杂，但如果一开始就用全局变量各写一套，你会发现红方和蓝方的代码几乎是完全相同的复制——只有几个数字不同。用类封装之后，两个司令部只是同一套逻辑的两个实例，主函数会变得出奇地简洁。在本章中，你将学会定义 `Warrior` 和 `Headquarter` 两个相互关联的类，以及在 C++ 中处理类之间相互引用时用到的**前向声明**技术。\n\n在动手写代码之前，先来梳理程序要做的事：从第 0 小时开始，每小时让红方先、蓝方后各尝试生产一名武士；如果当前该造的武士造不起，就顺移到下一种；五种都造不起则宣告停产；双方都停产后本组数据结束。\n据此可以确定核心分工：`Warrior` 负责记录自身属性并打印降生信息，`Headquarter` 负责管理生命元和生产顺序，主函数只需让两个司令部对象轮流调用 `Produce()` 就够了。",
+    "code": "",
+    "skip_code_verify": true,
+    "role": "planning",
+    "learning_goal": "Build a top-down mental model first, then fill in implementation details.",
+    "source_section_refs": [
+      "__intro_planning__"
+    ],
+    "code_block_refs": []
+  },
+  "groups": [
+    {
+      "h2_id": "v1.A",
+      "h2_title": "先搭整体骨架",
+      "sections": [
+        {
+          "section_id": "v1.A.1",
+          "task_id": "task_v1_decl_scaffold",
+          "title": "头文件、常量与前向声明",
+          "description": "学习目标：Create the minimum compile-time scaffold before class details.\n\n下面来创建 `warcraft1.cpp`，先写好文件开头和 `Warrior` 类的声明。\n\n文件开头引入 `iostream`、`cstdio`、`string` 三个头文件，定义常量 `WARRIOR_NUM = 5`。在 `Warrior` 类声明之前，单独写一行 `class Headquarter;`，这叫**前向声明**。`Warrior` 类内部需要保存一个指向 `Headquarter` 的指针，但 `Headquarter` 的完整定义还没出现。好在编译器只需知道\"这是个类的名字\"就能处理指针类型，不需要知道类里有什么，所以一行前向声明就够了。\n\n`Warrior` 类的私有部分包含三个成员：指向所属司令部的指针 `pHeadquarter`、武士种类编号 `kindNo`，以及武士序号 `no`。武士打印降生消息时需要查询司令部的颜色和该类武士的现有数量，`pHeadquarter` 是唯一的通道。公开部分包含两个静态成员数组：字符串数组 `names` 存放五种武士的名称，整型数组 `initialLifeValue` 存放各种武士的初始生命值。这两个成员前面有 `static` 关键字，意味着它们属于整个类而不属于某一个武士对象——无论创建了多少名武士，这两张表在内存里只有一份，所有武士都从这里读取自己的属性。此外公开部分还有构造函数和 `PrintResult()` 方法的声明。\n\n> **注意：** 静态成员变量必须在类外单独定义，否则编译能通过、链接会出错。你会在 1.5 节看到定义它们的三行代码。",
+          "code": "// warcraft1.cpp\n#include <iostream>\n#include <cstdio>\n#include <string>\nusing namespace std;\n\nconst int WARRIOR_NUM = 5;\n\nclass Headquarter;   // ①\n\nclass Warrior\n{\n    private:\n        Headquarter* pHeadquarter;   // ②\n        int kindNo;\n        int no;\n    public:\n        static string names[WARRIOR_NUM];           // ③\n        static int initialLifeValue[WARRIOR_NUM];   // ③\n        Warrior(Headquarter* p, int no_, int kindNo_);\n        void PrintResult(int nTime);\n};",
+          "learning_goal": "Create the minimum compile-time scaffold before class details.",
+          "source_section_refs": [
+            "1.2.1"
+          ],
+          "code_block_refs": [
+            "1.2.1"
+          ],
+          "prerequisites": []
+        },
+        {
+          "section_id": "v1.A.2",
+          "task_id": "task_v1_decl_classes",
+          "title": "先声明 Warrior 与 Headquarter",
+          "description": "学习目标：Declare both class interfaces as a whole to form macro structure.\n\n下面来创建 `warcraft1.cpp`，先写好文件开头和 `Warrior` 类的声明。\n\n文件开头引入 `iostream`、`cstdio`、`string` 三个头文件，定义常量 `WARRIOR_NUM = 5`。在 `Warrior` 类声明之前，单独写一行 `class Headquarter;`，这叫**前向声明**。`Warrior` 类内部需要保存一个指向 `Headquarter` 的指针，但 `Headquarter` 的完整定义还没出现。好在编译器只需知道\"这是个类的名字\"就能处理指针类型，不需要知道类里有什么，所以一行前向声明就够了。\n\n`Warrior` 类的私有部分包含三个成员：指向所属司令部的指针 `pHeadquarter`、武士种类编号 `kindNo`，以及武士序号 `no`。武士打印降生消息时需要查询司令部的颜色和该类武士的现有数量，`pHeadquarter` 是唯一的通道。公开部分包含两个静态成员数组：字符串数组 `names` 存放五种武士的名称，整型数组 `initialLifeValue` 存放各种武士的初始生命值。这两个成员前面有 `static` 关键字，意味着它们属于整个类而不属于某一个武士对象——无论创建了多少名武士，这两张表在内存里只有一份，所有武士都从这里读取自己的属性。此外公开部分还有构造函数和 `PrintResult()` 方法的声明。\n\n> **注意：** 静态成员变量必须在类外单独定义，否则编译能通过、链接会出错。你会在 1.5 节看到定义它们的三行代码。\n\n`Headquarter` 类的私有部分共有七个成员。`totalLifeValue` 是剩余生命元，每生产一名武士就扣减一次。`stopped` 是一个布尔开关，一旦置为 `true`，以后每次调用 `Produce()` 都立即返回，不再做任何计算。`totalWarriorNum` 记录累计生产的武士总数。`color` 用整数表示阵营，0 代表红方、1 代表蓝方，用整数而非字符串是为了方便在二维数组里当下标使用。`curMakingSeqIdx` 是一个在 0 到 4 之间循环的索引，记录\"下一个该轮到哪种武士\"。整型数组 `warriorNum` 有五个元素，分别记录各类武士已生产的数量，`PrintResult()` 打印时需要读这里。最后，`pWarriors` 是一个最多容纳 1000 名武士的指针数组，用于持有动态创建的武士对象。\n\n公开部分首先声明 `friend class Warrior`，打开了一扇让武士访问司令部私有数据的小门。静态二维数组 `makingSeq` 是一张 2×5 的查找表，第一维是阵营编号，第二维是生产顺序位置，每个元素存储武士的种类编号——这把题目里的\"生产顺序\"硬编码成了一张随时可查的表。此外还有 `Init()`、析构函数、`Produce()` 和 `GetColor()` 四个方法的声明。",
+          "code": "// warcraft1.cpp\n#include <iostream>\n#include <cstdio>\n#include <string>\nusing namespace std;\n\nconst int WARRIOR_NUM = 5;\n\nclass Headquarter;   // ①\n\nclass Warrior\n{\n    private:\n        Headquarter* pHeadquarter;   // ②\n        int kindNo;\n        int no;\n    public:\n        static string names[WARRIOR_NUM];           // ③\n        static int initialLifeValue[WARRIOR_NUM];   // ③\n        Warrior(Headquarter* p, int no_, int kindNo_);\n        void PrintResult(int nTime);\n};\n\n// warcraft1.cpp\n--snip--\nclass Headquarter\n{\n    private:\n        int  totalLifeValue;             // ①\n        bool stopped;                    // ②\n        int  totalWarriorNum;\n        int  color;                      // ③\n        int  curMakingSeqIdx;            // ④\n        int  warriorNum[WARRIOR_NUM];    // ⑤\n        Warrior* pWarriors[1000];\n    public:\n        friend class Warrior;                       // ⑥\n        static int makingSeq[2][WARRIOR_NUM];       // ⑦\n        void   Init(int color_, int lv);\n        ~Headquarter();\n        int    Produce(int nTime);\n        string GetColor();\n};",
+          "learning_goal": "Declare both class interfaces as a whole to form macro structure.",
+          "source_section_refs": [
+            "1.2.1",
+            "1.3.1"
+          ],
+          "code_block_refs": [
+            "1.2.1",
+            "1.3.1"
+          ],
+          "prerequisites": [
+            "task_v1_decl_scaffold"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v1.B",
+      "h2_title": "补类间协作接口",
+      "sections": [
+        {
+          "section_id": "v1.B.1",
+          "task_id": "task_v1_warrior_ctor",
+          "title": "实现 Warrior 构造函数",
+          "description": "学习目标：Bind warrior objects to their headquarter correctly.\n\n接下来实现 `Warrior` 的构造函数。构造函数接受三个参数：司令部指针 `p`、武士编号 `no_` 和种类编号 `kindNo_`。参数名比成员名多了一个下划线，这是 C++ 里常见的惯例——如果参数和成员同名，赋值语句 `no = no` 不会出错，但两边指的是同一个变量，什么也没赋到；多一个下划线就消除了这种歧义。函数体内将三个参数依次赋给 `no`、`kindNo` 和 `pHeadquarter`，武士从此刻起就\"认识\"自己的主人了。",
+          "code": "// warcraft1.cpp\n--snip--\nWarrior::Warrior(Headquarter* p, int no_, int kindNo_)\n{\n    no           = no_;      // ①\n    kindNo       = kindNo_;\n    pHeadquarter = p;        // ②\n}",
+          "learning_goal": "Bind warrior objects to their headquarter correctly.",
+          "source_section_refs": [
+            "1.2.2"
+          ],
+          "code_block_refs": [
+            "1.2.2"
+          ],
+          "prerequisites": [
+            "task_v1_decl_classes"
+          ]
+        },
+        {
+          "section_id": "v1.B.2",
+          "task_id": "task_v1_print_pipeline",
+          "title": "实现打印链路与颜色辅助函数",
+          "description": "学习目标：Connect warrior output with headquarter data access.\n\n每当一名武士诞生，就要立刻打印一条消息。`PrintResult()` 接受当前小时数 `nTime` 作为参数，先调用 `pHeadquarter->GetColor()` 把颜色整数翻译成 `\"red\"` 或 `\"blue\"` 字符串，然后用 `printf` 按题目规定的格式输出一行。\n\n输出内容依次是：三位补零的时间、阵营颜色、武士类型名称、武士编号、武士初始生命值、该类型武士当前已降生的数量（从 `pHeadquarter->warriorNum[kindNo]` 读取），最后是类型名称和 `in X headquarter` 结尾。由于 `printf` 不直接认识 C++ 的 `string` 类型，颜色和名称字符串都需要调用 `.c_str()` 转成 C 风格字符指针再传入。之所以能直接读取 `pHeadquarter->warriorNum[kindNo]` 这个私有成员，是因为我们稍后会在 `Headquarter` 里声明 `friend class Warrior`，允许武士访问司令部的私有数据。\n\n> **注意：** `%03d` 的含义：`%d` 输出整数，`3` 表示最少显示 3 位，`0` 表示不足的位数用 0 补齐。数字 7 会输出为 `007`，数字 42 会输出为 `042`。这正是题目要求的时间格式。\n\n`GetColor()` 只有两行，根据 `color` 是 0 还是 1 返回 `\"red\"` 或 `\"blue\"` 字符串。它被好几处代码调用，专门写成方法可以避免到处重复写 `if (color == 0)`。\n\n紧随其后是三行静态成员的类外定义。`Warrior::names` 用初始化列表直接赋值五种武士的名称，顺序与 `kindNo` 对应：0=dragon，1=ninja，2=iceman，3=lion，4=wolf。`Warrior::initialLifeValue` 只申请内存，真正的值会在主函数里通过 `scanf` 逐个填入。最值得停下来看一眼的是 `Headquarter::makingSeq` 的初始化：第一行 `{2,3,4,1,0}` 是红方的生产顺序（kindNo 2→3→4→1→0，即 iceman→lion→wolf→ninja→dragon），第二行 `{3,0,1,2,4}` 是蓝方的顺序。把题目里的文字描述翻译成编号序列，之后用 `makingSeq[color][curMakingSeqIdx]` 就能一步取到当前该生产哪种武士。",
+          "code": "// warcraft1.cpp\n--snip--\nvoid Warrior::PrintResult(int nTime)\n{\n    string color = pHeadquarter->GetColor();   // ①\n    printf(\"%03d %s %s %d born with strength %d,%d %s in %s headquarter\\n\",\n           nTime,\n           color.c_str(),                        // ②\n           names[kindNo].c_str(),\n           no,\n           initialLifeValue[kindNo],\n           pHeadquarter->warriorNum[kindNo],     // ③\n           names[kindNo].c_str(),\n           color.c_str());\n}\n\n// warcraft1.cpp\n--snip--\nstring Headquarter::GetColor()\n{\n    if (color == 0) return \"red\";\n    else            return \"blue\";\n}\n\nstring Warrior::names[WARRIOR_NUM] = {\"dragon\",\"ninja\",\"iceman\",\"lion\",\"wolf\"};  // ①\nint    Warrior::initialLifeValue[WARRIOR_NUM];   // ②\n\n// 红方顺序：iceman(2)→lion(3)→wolf(4)→ninja(1)→dragon(0)\n// 蓝方顺序：lion(3)→dragon(0)→ninja(1)→iceman(2)→wolf(4)\nint Headquarter::makingSeq[2][WARRIOR_NUM] = { {2,3,4,1,0}, {3,0,1,2,4} };  // ③",
+          "learning_goal": "Connect warrior output with headquarter data access.",
+          "source_section_refs": [
+            "1.2.3",
+            "1.5"
+          ],
+          "code_block_refs": [
+            "1.2.3",
+            "1.5"
+          ],
+          "prerequisites": [
+            "task_v1_warrior_ctor"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v1.C",
+      "h2_title": "补对象生命周期与状态管理",
+      "sections": [
+        {
+          "section_id": "v1.C.1",
+          "task_id": "task_v1_init_state",
+          "title": "实现 Headquarter::Init",
+          "description": "学习目标：Make state reset repeatable for multi-case input.\n\n题目有多组测试数据，同一对司令部对象需要反复重置，因此专门写一个 `Init()` 方法来做这件事，而不是依赖构造函数。`Init()` 接受颜色和初始生命元两个参数，将 `color`、`totalLifeValue`、`totalWarriorNum` 依次赋值，把 `stopped` 重置为 `false`（每组数据开始时司令部从\"未停产\"状态重新出发），把 `curMakingSeqIdx` 归零，并用循环把 `warriorNum` 的五个元素全部清零——否则上一组数据的计数会带到下一组里去，输出就全错了。\n\n> **注意：** 这里用 `Init()` 而非构造函数，因为 C++ 的构造函数只在对象创建时调用一次，之后就不能再调了。`Init()` 是一个普通方法，可以在每组测试数据开始时反复调用，适合处理多组输入的题目。",
+          "code": "// warcraft1.cpp\n--snip--\nvoid Headquarter::Init(int color_, int lv)\n{\n    color           = color_;\n    totalLifeValue  = lv;\n    totalWarriorNum = 0;\n    stopped         = false;          // ①\n    curMakingSeqIdx = 0;\n    for (int i = 0; i < WARRIOR_NUM; i++)\n        warriorNum[i] = 0;            // ②\n}",
+          "learning_goal": "Make state reset repeatable for multi-case input.",
+          "source_section_refs": [
+            "1.3.2"
+          ],
+          "code_block_refs": [
+            "1.3.2"
+          ],
+          "prerequisites": [
+            "task_v1_decl_classes"
+          ]
+        },
+        {
+          "section_id": "v1.C.2",
+          "task_id": "task_v1_destructor",
+          "title": "实现析构函数释放资源",
+          "description": "学习目标：Pair allocation and release to avoid memory leaks.\n\n每名武士都是用 `new` 创建的，程序结束前需要逐一 `delete`。析构函数用一个循环遍历 `pWarriors` 指针数组，对 `totalWarriorNum` 范围内的每一个指针调用 `delete`，释放动态分配的内存。规则很简单：`new` 出来的东西，最终必须 `delete`，否则就是内存泄漏。析构函数会在对象生命期结束时（程序退出时）自动被调用。",
+          "code": "// warcraft1.cpp\n--snip--\nHeadquarter::~Headquarter()\n{\n    for (int i = 0; i < totalWarriorNum; i++)\n        delete pWarriors[i];   // ①\n}",
+          "learning_goal": "Pair allocation and release to avoid memory leaks.",
+          "source_section_refs": [
+            "1.3.3"
+          ],
+          "code_block_refs": [
+            "1.3.3"
+          ],
+          "prerequisites": [
+            "task_v1_init_state"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v1.D",
+      "h2_title": "实现核心生产算法",
+      "sections": [
+        {
+          "section_id": "v1.D.1",
+          "task_id": "task_v1_produce_scan",
+          "title": "实现 Produce 第一段：跳过造不起",
+          "description": "学习目标：Implement cyclic scanning without infinite loops.\n\n`Produce()` 是整个程序最关键的方法，我们分两步来看。\n\n`Produce()` 一进入就先检查 `stopped` 标志，若已停产则立即返回 0，不做任何计算。\n\n接下来是一个 `while` 循环，负责跳过当前造不起的武士。循环条件有两部分：其一，用 `makingSeq[color][curMakingSeqIdx]` 取出当前该轮到的武士种类编号，查 `initialLifeValue` 得到所需生命元，若大于剩余 `totalLifeValue` 则说明造不起；其二，`searchingTimes < WARRIOR_NUM` 保证最多转一整圈（5 次）就停下，不会无限循环。每次循环体内把 `curMakingSeqIdx` 加一并对 5 取模（让索引在 0 到 4 之间循环，如同钟表指针），同时把 `searchingTimes` 加一。",
+          "code": "// warcraft1.cpp\n--snip--\nint Headquarter::Produce(int nTime)\n{\n    if (stopped)        // ①\n        return 0;\n\n    int searchingTimes = 0;\n    while (Warrior::initialLifeValue[makingSeq[color][curMakingSeqIdx]]\n               > totalLifeValue\n           && searchingTimes < WARRIOR_NUM)   // ②\n    {\n        curMakingSeqIdx = (curMakingSeqIdx + 1) % WARRIOR_NUM;   // ③\n        searchingTimes++;\n    }\n    --snip--",
+          "learning_goal": "Implement cyclic scanning without infinite loops.",
+          "source_section_refs": [
+            "1.4",
+            "1.4.1"
+          ],
+          "code_block_refs": [
+            "1.4.1"
+          ],
+          "prerequisites": [
+            "task_v1_init_state"
+          ]
+        },
+        {
+          "section_id": "v1.D.2",
+          "task_id": "task_v1_produce_commit",
+          "title": "实现 Produce 第二段：停产判定与正式生产",
+          "description": "学习目标：Finalize stop boundary and successful production branch.\n\n`while` 循环结束后，用 `makingSeq[color][curMakingSeqIdx]` 取出当前候选武士的种类编号存入 `kindNo`，然后再做一次判断：如果 `initialLifeValue[kindNo]` 仍然大于 `totalLifeValue`，说明转了整整一圈五种武士都造不起。此时把 `stopped` 置为 `true`，按颜色打印停产消息，返回 0。这次循环后的二次判断是必要的，因为循环本身无法区分\"找到了造得起的武士\"和\"转完一圈都不够\"这两种退出情况。\n\n若通过了判断，则正式生产：先从 `totalLifeValue` 扣减该武士的生命值，把 `curMakingSeqIdx` 推进到下一位，用 `new` 创建武士对象并存入 `pWarriors` 数组（构造函数的第一个参数传 `this`，让武士认识自己的司令部；编号为 `totalWarriorNum + 1`，从 1 开始计数），递增 `warriorNum[kindNo]`，立即调用 `PrintResult()` 打印降生消息，最后递增 `totalWarriorNum` 并返回 1，告知主函数本轮成功生产了一名武士。",
+          "code": "// warcraft1.cpp（接上）\n    --snip--\n    int kindNo = makingSeq[color][curMakingSeqIdx];\n\n    if (Warrior::initialLifeValue[kindNo] > totalLifeValue)   // ①\n    {\n        stopped = true;\n        if (color == 0)\n            printf(\"%03d red headquarter stops making warriors\\n\",  nTime);\n        else\n            printf(\"%03d blue headquarter stops making warriors\\n\", nTime);\n        return 0;\n    }\n\n    totalLifeValue -= Warrior::initialLifeValue[kindNo];                   // ②\n    curMakingSeqIdx = (curMakingSeqIdx + 1) % WARRIOR_NUM;\n    pWarriors[totalWarriorNum] = new Warrior(this, totalWarriorNum+1, kindNo);  // ③\n    warriorNum[kindNo]++;\n    pWarriors[totalWarriorNum]->PrintResult(nTime);\n    totalWarriorNum++;\n    return 1;   // ④\n}",
+          "learning_goal": "Finalize stop boundary and successful production branch.",
+          "source_section_refs": [
+            "1.4.2"
+          ],
+          "code_block_refs": [
+            "1.4.2"
+          ],
+          "prerequisites": [
+            "task_v1_produce_scan",
+            "task_v1_print_pipeline"
+          ]
+        }
+      ]
+    },
+    {
+      "h2_id": "v1.E",
+      "h2_title": "组装主流程与静态数据",
+      "sections": [
+        {
+          "section_id": "v1.E.1",
+          "task_id": "task_v1_static_members",
+          "title": "完成静态成员定义与生产顺序表",
+          "description": "学习目标：Ensure global mappings are complete before execution.\n\n`GetColor()` 只有两行，根据 `color` 是 0 还是 1 返回 `\"red\"` 或 `\"blue\"` 字符串。它被好几处代码调用，专门写成方法可以避免到处重复写 `if (color == 0)`。\n\n紧随其后是三行静态成员的类外定义。`Warrior::names` 用初始化列表直接赋值五种武士的名称，顺序与 `kindNo` 对应：0=dragon，1=ninja，2=iceman，3=lion，4=wolf。`Warrior::initialLifeValue` 只申请内存，真正的值会在主函数里通过 `scanf` 逐个填入。最值得停下来看一眼的是 `Headquarter::makingSeq` 的初始化：第一行 `{2,3,4,1,0}` 是红方的生产顺序（kindNo 2→3→4→1→0，即 iceman→lion→wolf→ninja→dragon），第二行 `{3,0,1,2,4}` 是蓝方的顺序。把题目里的文字描述翻译成编号序列，之后用 `makingSeq[color][curMakingSeqIdx]` 就能一步取到当前该生产哪种武士。",
+          "code": "// warcraft1.cpp\n--snip--\nstring Headquarter::GetColor()\n{\n    if (color == 0) return \"red\";\n    else            return \"blue\";\n}\n\nstring Warrior::names[WARRIOR_NUM] = {\"dragon\",\"ninja\",\"iceman\",\"lion\",\"wolf\"};  // ①\nint    Warrior::initialLifeValue[WARRIOR_NUM];   // ②\n\n// 红方顺序：iceman(2)→lion(3)→wolf(4)→ninja(1)→dragon(0)\n// 蓝方顺序：lion(3)→dragon(0)→ninja(1)→iceman(2)→wolf(4)\nint Headquarter::makingSeq[2][WARRIOR_NUM] = { {2,3,4,1,0}, {3,0,1,2,4} };  // ③",
+          "learning_goal": "Ensure global mappings are complete before execution.",
+          "source_section_refs": [
+            "1.5"
+          ],
+          "code_block_refs": [
+            "1.5"
+          ],
+          "prerequisites": [
+            "task_v1_decl_classes"
+          ]
+        },
+        {
+          "section_id": "v1.E.2",
+          "task_id": "task_v1_main_assemble",
+          "title": "主函数组装与双司令部驱动",
+          "description": "学习目标：Complete input, init, dual-headquarter loop, and exit logic.\n\n主函数把所有部件组装起来。`RedHead` 和 `BlueHead` 两个司令部对象在程序启动时各创建一次，贯穿整个运行过程，每组数据用 `Init()` 重置。\n\n读入总组数 `t` 后，对每组数据：先打印 `Case:n`，读入生命元数量 `m` 和五种武士的初始生命值（直接写入静态成员 `Warrior::initialLifeValue`，之后所有武士对象都能读到），然后用 `Init(0, m)` 和 `Init(1, m)` 分别重置红蓝司令部。\n\n内层循环每次先让红方调用 `Produce(nTime)`、再让蓝方调用，顺序与题目的输出要求完全一致。返回值分别用 `tmp1` 和 `tmp2` 接收，而不是直接写进 `&&` 条件里——这非常关键：如果把两次调用合并到一个 `if` 条件中，C++ 的短路求值规则会导致当红方返回 0 时蓝方根本不被调用，蓝方就漏掉了当轮的生产机会，输出将完全出错。只有当同一轮内 `tmp1` 和 `tmp2` 都是 0，即双方均已停产，循环才退出。\n\n如果此时编译并运行程序，输入样例：\n\n```\n1\n20\n3 4 5 6 7\n```\n\n你应该看到如下输出：\n\n```\nCase:1\n000 red iceman 1 born with strength 5,1 iceman in red headquarter\n000 blue lion 1 born with strength 6,1 lion in blue headquarter\n001 red lion 2 born with strength 6,1 lion in red headquarter\n001 blue dragon 2 born with strength 3,1 dragon in blue headquarter\n002 red wolf 3 born with strength 7,1 wolf in red headquarter\n002 blue ninja 3 born with strength 4,1 ninja in blue headquarter\n003 red headquarter stops making warriors\n003 blue iceman 4 born with strength 5,1 iceman in blue headquarter\n004 blue headquarter stops making warriors\n```",
+          "code": "// warcraft1.cpp\n--snip--\nint main()\n{\n    int t, m;\n    Headquarter RedHead, BlueHead;   // ①\n    scanf(\"%d\", &t);\n    int nCaseNo = 1;\n\n    while (t--)\n    {\n        printf(\"Case:%d\\n\", nCaseNo++);\n        scanf(\"%d\", &m);\n        for (int i = 0; i < WARRIOR_NUM; i++)\n            scanf(\"%d\", &Warrior::initialLifeValue[i]);   // ②\n\n        RedHead.Init(0, m);    // ③\n        BlueHead.Init(1, m);\n\n        int nTime = 0;\n        while (true)\n        {\n            int tmp1 = RedHead.Produce(nTime);    // ④\n            int tmp2 = BlueHead.Produce(nTime);\n            if (tmp1 == 0 && tmp2 == 0)           // ⑤\n                break;\n            nTime++;\n        }\n    }\n    return 0;\n}",
+          "learning_goal": "Complete input, init, dual-headquarter loop, and exit logic.",
+          "source_section_refs": [
+            "1.6"
+          ],
+          "code_block_refs": [
+            "1.6"
+          ],
+          "prerequisites": [
+            "task_v1_produce_commit",
+            "task_v1_static_members",
+            "task_v1_destructor"
+          ]
+        }
+      ]
+    }
+  ],
+  "debug_task_id": "task_debug"
+}
